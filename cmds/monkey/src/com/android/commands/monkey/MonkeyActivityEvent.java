@@ -16,12 +16,18 @@
 
 package com.android.commands.monkey;
 
+import android.app.ActivityManager;
 import android.app.IActivityManager;
 import android.content.ComponentName;
 import android.content.Intent;
+import android.content.pm.IPackageManager;
+import android.os.Binder;
 import android.os.Bundle;
 import android.os.RemoteException;
+import android.os.ServiceManager;
 import android.view.IWindowManager;
+
+import java.util.HashMap;
 
 /**
  * monkey activity event
@@ -29,6 +35,7 @@ import android.view.IWindowManager;
 public class MonkeyActivityEvent extends MonkeyEvent {
     private ComponentName mApp;
     long mAlarmTime = 0;
+    private HashMap<ComponentName, String> mMainApps = new HashMap<>();
 
     public MonkeyActivityEvent(ComponentName app) {
         super(EVENT_TYPE_ACTIVITY);
@@ -41,12 +48,23 @@ public class MonkeyActivityEvent extends MonkeyEvent {
         mAlarmTime = arg;
     }
 
+    public MonkeyActivityEvent(ComponentName app,
+            HashMap<ComponentName, String> MainApps) {
+        super(EVENT_TYPE_ACTIVITY);
+        mApp = app;
+        mMainApps = MainApps;
+    }
+
     /**
      * @return Intent for the new activity
      */
     private Intent getEvent() {
         Intent intent = new Intent(Intent.ACTION_MAIN);
-        intent.addCategory(Intent.CATEGORY_LAUNCHER);
+        if (mMainApps.containsKey(mApp)) {
+            intent.addCategory(mMainApps.get(mApp));
+        } else {
+            intent.addCategory(Intent.CATEGORY_LAUNCHER);
+        }
         intent.setComponent(mApp);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
         return intent;
@@ -56,7 +74,7 @@ public class MonkeyActivityEvent extends MonkeyEvent {
     public int injectEvent(IWindowManager iwm, IActivityManager iam, int verbose) {
         Intent intent = getEvent();
         if (verbose > 0) {
-            System.out.println(":Switch: " + intent.toUri(0));
+            Logger.out.println(":Switch: " + intent.toUri(0));
         }
 
         if (mAlarmTime != 0){
@@ -66,18 +84,38 @@ public class MonkeyActivityEvent extends MonkeyEvent {
         }
 
         try {
-            iam.startActivity(null, null, intent, null, null, null, 0,
-                    0, null, null);
+            iam.startActivityAsUserWithFeature(null, getPackageName(), null, intent, null, null,
+                    null, 0, 0, null, null, ActivityManager.getCurrentUser());
         } catch (RemoteException e) {
-            System.err.println("** Failed talking with activity manager!");
+            Logger.err.println("** Failed talking with activity manager!");
             return MonkeyEvent.INJECT_ERROR_REMOTE_EXCEPTION;
         } catch (SecurityException e) {
             if (verbose > 0) {
-                System.out.println("** Permissions error starting activity "
+                Logger.out.println("** Permissions error starting activity "
                         + intent.toUri(0));
             }
             return MonkeyEvent.INJECT_ERROR_SECURITY_EXCEPTION;
         }
         return MonkeyEvent.INJECT_SUCCESS;
+    }
+
+    /**
+     * Obtain the package name of the current process using the current UID. The package name has to
+     * match the current UID in IActivityManager#startActivityAsUser to be allowed to start an
+     * activity.
+     */
+    private static String getPackageName() {
+        try {
+            IPackageManager pm = IPackageManager.Stub.asInterface(
+                    ServiceManager.getService("package"));
+            if (pm == null) {
+                return null;
+            }
+            String[] packages = pm.getPackagesForUid(Binder.getCallingUid());
+            return packages != null ? packages[0] : null;
+        } catch (RemoteException e) {
+            Logger.err.println("** Failed talking with package manager!");
+            return null;
+        }
     }
 }

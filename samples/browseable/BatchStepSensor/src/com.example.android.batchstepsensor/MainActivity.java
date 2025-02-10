@@ -14,8 +14,6 @@
 * limitations under the License.
 */
 
-
-
 package com.example.android.batchstepsensor;
 
 import android.os.Bundle;
@@ -58,7 +56,7 @@ public class MainActivity extends SampleActivityBase implements CardStream {
         }
 
         // Use fragment as click listener for cards, but must implement correct interface
-        if(!(fragment instanceof OnCardClickListener)){
+        if (!(fragment instanceof OnCardClickListener)){
             throw new ClassCastException("BatchStepSensorFragment must " +
                     "implement OnCardClickListener interface.");
         }

@@ -15,8 +15,6 @@
 */
 
 
-
-
 package com.example.android.repeatingalarm;
 
 import android.graphics.Color;

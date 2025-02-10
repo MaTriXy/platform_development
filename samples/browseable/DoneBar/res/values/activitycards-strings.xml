@@ -16,8 +16,6 @@
 -->
 
 
-
-
 <resources>
     <string name="donebaractivity_title">Done Bar</string>
     <string name="donebaractivity_description">In this presentation, a done bar replaces the action bar entirely, providing

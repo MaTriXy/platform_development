@@ -44,15 +44,15 @@ public class MonkeyRotationEvent extends MonkeyEvent {
     @Override
     public int injectEvent(IWindowManager iwm, IActivityManager iam, int verbose) {
         if (verbose > 0) {
-            System.out.println(":Sending rotation degree=" + mRotationDegree +
+            Logger.out.println(":Sending rotation degree=" + mRotationDegree +
                                ", persist=" + mPersist);
         }
 
         // inject rotation event
         try {
-            iwm.freezeRotation(mRotationDegree);
+            iwm.freezeRotation(mRotationDegree, /* caller= */ "MonkeyRotationEven#injectEvent");
             if (!mPersist) {
-                iwm.thawRotation();
+                iwm.thawRotation(/* caller= */ "MonkeyRotationEven#injectEvent");
             }
             return MonkeyEvent.INJECT_SUCCESS;
         } catch (RemoteException ex) {

@@ -23,6 +23,9 @@ import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Environment;
+import android.os.storage.StorageManager;
+import android.os.storage.StorageVolume;
 import android.provider.DocumentsContract;
 import android.provider.DocumentsContract.Document;
 import android.util.Log;
@@ -204,6 +207,26 @@ public class DocumentsSample extends Activity {
         view.addView(button);
 
         button = new Button(context);
+        button.setText("GET_CONTENT */* with content query \"FILE\"");
+        button.setOnClickListener(new OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType("*/*");
+                intent.putExtra(Intent.EXTRA_CONTENT_QUERY, "FILE");
+                if (multiple.isChecked()) {
+                    intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                }
+                if (localOnly.isChecked()) {
+                    intent.putExtra(Intent.EXTRA_LOCAL_ONLY, true);
+                }
+                startActivityForResult(Intent.createChooser(intent, "Kittens!"), CODE_READ);
+            }
+        });
+        view.addView(button);
+
+        button = new Button(context);
         button.setText("OPEN_DOC_TREE");
         button.setOnClickListener(new OnClickListener() {
             @Override
@@ -213,6 +236,19 @@ public class DocumentsSample extends Activity {
                     intent.putExtra(Intent.EXTRA_LOCAL_ONLY, true);
                 }
                 startActivityForResult(Intent.createChooser(intent, "Kittens!"), CODE_TREE);
+            }
+        });
+        view.addView(button);
+
+        button = new Button(context);
+        button.setText("OPEN_DOC_TREE primary volume initial uri");
+        button.setOnClickListener(new OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Intent intent = getSystemService(StorageManager.class)
+                        .getPrimaryStorageVolume()
+                        .createOpenDocumentTreeIntent();
+                startActivityForResult(intent, CODE_TREE);
             }
         });
         view.addView(button);
@@ -285,6 +321,11 @@ public class DocumentsSample extends Activity {
                 closeQuietly(os);
             }
         } else if (requestCode == CODE_TREE) {
+            try {
+                cr.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (SecurityException e) {
+                log("FAILED TO TAKE PERMISSION", e);
+            }
             // Find existing docs
             Uri doc = DocumentsContract.buildDocumentUriUsingTree(uri,
                     DocumentsContract.getTreeDocumentId(uri));
@@ -301,9 +342,9 @@ public class DocumentsSample extends Activity {
             }
 
             // Create some documents
-            Uri pic = DocumentsContract.createDocument(cr, doc, "image/png", "pic.png");
-            Uri dir = DocumentsContract.createDocument(cr, doc, Document.MIME_TYPE_DIR, "my dir");
-            Uri dirPic = DocumentsContract.createDocument(cr, dir, "image/png", "pic2.png");
+            Uri pic = createDocument(cr, doc, "image/png", "pic.png");
+            Uri dir = createDocument(cr, doc, Document.MIME_TYPE_DIR, "my dir");
+            Uri dirPic = createDocument(cr, dir, "image/png", "pic2.png");
 
             log("created " + pic);
             log("created " + dir);
@@ -322,13 +363,13 @@ public class DocumentsSample extends Activity {
             }
 
             // And delete the first pic
-            if (DocumentsContract.deleteDocument(cr, pic)) {
+            if (deleteDocument(cr, pic)) {
                 log("deleted untouched pic");
             } else {
                 log("FAILED TO DELETE PIC");
             }
         } else if (requestCode == CODE_RENAME) {
-            final Uri newUri = DocumentsContract.renameDocument(cr, uri, "MEOW.TEST");
+            final Uri newUri = renameDocument(cr, uri, "MEOW.TEST");
             log("rename result=" + newUri);
 
             InputStream is = null;
@@ -340,6 +381,33 @@ public class DocumentsSample extends Activity {
             } finally {
                 closeQuietly(is);
             }
+        }
+    }
+
+    private Uri createDocument(ContentResolver resolver, Uri documentUri, String mimeType,
+            String displayName) {
+        Uri uri;
+        try {
+            uri = DocumentsContract.createDocument(resolver, documentUri, mimeType, displayName);
+        } catch (Exception e) {
+            uri = null;
+        }
+        return uri;
+    }
+
+    private boolean deleteDocument(ContentResolver resolver, Uri documentUri) {
+        try {
+            return DocumentsContract.deleteDocument(resolver, documentUri);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private Uri renameDocument(ContentResolver resolver, Uri uri, String newName) {
+        try {
+            return DocumentsContract.renameDocument(resolver, uri, newName);
+        } catch (Exception e) {
+            return null;
         }
     }
 

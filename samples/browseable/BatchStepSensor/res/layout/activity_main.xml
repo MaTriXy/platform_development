@@ -15,8 +15,6 @@
  limitations under the License.
 -->
 
-
-
 <fragment
     android:id="@+id/fragment_cardstream"
     android:name="com.example.android.batchstepsensor.cardstream.CardStreamFragment"

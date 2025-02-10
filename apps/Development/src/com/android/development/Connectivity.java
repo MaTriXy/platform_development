@@ -1,4 +1,4 @@
-/* //device/apps/Settings/src/com/android/settings/Keyguard.java
+/**
 **
 ** Copyright 2006, The Android Open Source Project
 **
@@ -18,70 +18,62 @@
 package com.android.development;
 
 import android.app.Activity;
-import android.app.ActivityManagerNative;
 import android.app.AlarmManager;
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.SharedPreferences;
-import android.content.pm.PackageManager.NameNotFoundException;
 import android.net.ConnectivityManager;
-import android.net.LinkAddress;
-import android.net.NetworkUtils;
-import android.net.RouteInfo;
+import android.net.ConnectivityManager.NetworkCallback;
+import android.net.EthernetManager;
+import android.net.IpConfiguration;
+import android.net.LinkProperties;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.NetworkRequest;
 import android.net.wifi.ScanResult;
 import android.net.wifi.WifiManager;
-import android.os.RemoteException;
 import android.os.Handler;
 import android.os.Message;
 import android.os.IBinder;
 import android.os.INetworkManagementService;
-import android.os.Parcel;
 import android.os.PowerManager;
 import android.os.PowerManager.WakeLock;
 import android.os.ServiceManager;
-import android.os.ServiceManagerNative;
 import android.os.SystemClock;
-import android.provider.Settings;
 import android.os.Bundle;
+import android.text.TextUtils;
 import android.util.Log;
-import android.view.IWindowManager;
+import android.util.SparseArray;
 import android.view.View;
-import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
-import android.widget.CompoundButton;
 import android.widget.EditText;
-import android.widget.Spinner;
 import android.widget.TextView;
-import android.widget.Toast;
-import android.widget.AdapterView.OnItemSelectedListener;
 
-import com.android.internal.telephony.Phone;
+import libcore.io.IoUtils;
 
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.PrintWriter;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.IOException;
+import java.io.OutputStreamWriter;
+import java.net.HttpURLConnection;
 import java.net.InetAddress;
-import java.net.NetworkInterface;
+import java.net.Proxy;
 import java.net.Socket;
+import java.net.URL;
 import java.util.ArrayList;
-import java.util.Enumeration;
 import java.util.List;
-import java.util.Map;
+import java.util.Random;
 
-import org.apache.http.client.HttpClient;
-import org.apache.http.client.methods.HttpGet;
-import org.apache.http.conn.params.ConnRouteParams;
-import org.apache.http.params.BasicHttpParams;
-import org.apache.http.params.HttpParams;
-import org.apache.http.HttpResponse;
-import org.apache.http.impl.client.DefaultHttpClient;
+import static android.net.ConnectivityManager.CONNECTIVITY_ACTION;
+import static android.net.NetworkCapabilities.*;
+
+import com.android.internal.util.MessageUtils;
 
 public class Connectivity extends Activity {
-    private static final String TAG = "DevTools - Connectivity";
+    private static final String TAG = "DevToolsConnectivity";
     private static final String GET_SCAN_RES = "Get Results";
     private static final String START_SCAN = "Start Scan";
     private static final String PROGRESS_SCAN = "In Progress";
@@ -118,12 +110,17 @@ public class Connectivity extends Activity {
     private long mTotalScanTime = 0;
     private long mTotalScanCount = 0;
 
+    private TextView mLinkStatsResults;
+    private TextView mHttpRequestResults;
+
     private String mTdlsAddr = null;
 
     private WifiManager mWm;
+    private WifiManager.MulticastLock mWml;
     private PowerManager mPm;
     private ConnectivityManager mCm;
     private INetworkManagementService mNetd;
+    private EthernetManager mEm;
 
     private WifiScanReceiver mScanRecv;
     IntentFilter mIntentFilter;
@@ -142,8 +139,23 @@ public class Connectivity extends Activity {
     private static final String TEST_ALARM_CYCLE_EXTRA = "CONNECTIVITY_TEST_CYCLE_EXTRA";
     private static final String SCREEN_ON = "SCREEN_ON";
     private static final String SCREEN_OFF = "SCREEN_OFF";
+
+    private static final String NETWORK_CONDITIONS_MEASURED =
+            "android.net.conn.NETWORK_CONDITIONS_MEASURED";
+
+    private void logBroadcast(Intent intent) {
+        StringBuilder sb = new StringBuilder();
+        Bundle b = intent.getExtras();
+        for (String key : b.keySet()) {
+            sb.append(String.format(" %s=%s", key, b.get(key)));
+        }
+        Log.d(TAG, "Got broadcast " + intent.getAction() + " extras:" + sb.toString());
+    }
+
     public BroadcastReceiver mReceiver = new BroadcastReceiver() {
         public void onReceive(Context context, Intent intent) {
+            logBroadcast(intent);
+
             if (intent.getAction().equals(CONNECTIVITY_TEST_ALARM)) {
                 String extra = (String)intent.getExtra(TEST_ALARM_EXTRA);
                 PowerManager pm = (PowerManager)context.getSystemService(Context.POWER_SERVICE);
@@ -250,6 +262,164 @@ public class Connectivity extends Activity {
         }
     }
 
+    private static class DevToolsNetworkCallback extends NetworkCallback {
+        private static final String TAG = "DevToolsNetworkCallback";
+
+        public void onAvailable(Network network) {
+            Log.d(TAG, "onAvailable: " + network);
+        }
+
+        public void onCapabilitiesChanged(Network network, NetworkCapabilities nc) {
+            Log.d(TAG, "onCapabilitiesChanged: " + network + " " + nc.toString());
+        }
+
+        public void onLinkPropertiesChanged(Network network, LinkProperties lp) {
+            Log.d(TAG, "onLinkPropertiesChanged: " + network + " " + lp.toString());
+        }
+
+        public void onLosing(Network network, int maxMsToLive) {
+            Log.d(TAG, "onLosing: " + network + " " + maxMsToLive);
+        }
+
+        public void onLost(Network network) {
+            Log.d(TAG, "onLost: " + network);
+        }
+    }
+    private DevToolsNetworkCallback mCallback;
+
+    private class RequestableNetwork {
+        private final NetworkRequest mRequest;
+        private final int mRequestButton, mReleaseButton, mProgressBar;
+        private NetworkCallback mCallback;
+        private Network mNetwork;
+
+        public RequestableNetwork(NetworkRequest request, int requestButton, int releaseButton,
+                int progressBar) {
+            mRequest = request;
+            mRequestButton = requestButton;
+            mReleaseButton = releaseButton;
+            mProgressBar = progressBar;
+        }
+
+        public RequestableNetwork(int capability, int requestButton, int releaseButton,
+                int progressBar) {
+            this(new NetworkRequest.Builder()
+                    .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
+                    .addCapability(capability)
+                    .build(),
+                    requestButton, releaseButton, progressBar);
+        }
+
+        public void addOnClickListener() {
+            findViewById(mRequestButton).setOnClickListener(
+                    new View.OnClickListener() { public void onClick(View v) { request(); }});
+            findViewById(mReleaseButton).setOnClickListener(
+                    new View.OnClickListener() { public void onClick(View v) { release(); }});
+        }
+
+        public void setRequested(boolean requested) {
+            findViewById(mRequestButton).setEnabled(!requested);
+            findViewById(mReleaseButton).setEnabled(requested);
+            findViewById(mProgressBar).setVisibility(
+                    requested ? View.VISIBLE : View.GONE);
+        }
+
+        public void request() {
+            if (mCallback == null) {
+                mCallback = new NetworkCallback() {
+                    @Override
+                    public void onAvailable(Network network) {
+                        mNetwork = network;
+                        onHttpRequestResults(null);
+                        runOnUiThread(() -> findViewById(mProgressBar).setVisibility(View.GONE));
+                    }
+                    @Override
+                    public void onLost(Network network) {
+                        mNetwork = null;
+                        onHttpRequestResults(null);
+                    }
+                };
+                mCm.requestNetwork(mRequest, mCallback);
+                setRequested(true);
+            }
+        }
+
+        public void release() {
+            if (mCallback != null) {
+                mNetwork = null;
+                onHttpRequestResults(null);
+                mCm.unregisterNetworkCallback(mCallback);
+                mCallback = null;
+                setRequested(false);
+            }
+        }
+
+        public Network getNetwork() {
+            return mNetwork;
+        }
+    }
+
+    private final ArrayList<RequestableNetwork> mRequestableNetworks = new ArrayList<>();
+    private final RequestableNetwork mBoundTestNetwork;
+    private boolean mRequestRunning;
+
+    private void addRequestableNetwork(RequestableNetwork network) {
+        mRequestableNetworks.add(network);
+    }
+
+    private void addRequestableNetwork(int capability, int requestButton, int releaseButton,
+            int progressBar) {
+        mRequestableNetworks.add(new RequestableNetwork(capability, requestButton, releaseButton,
+                progressBar));
+    }
+
+    private static class DevToolsEthListener implements EthernetManager.InterfaceStateListener {
+        private static final String TAG = DevToolsEthListener.class.getSimpleName();
+
+        private static final SparseArray<String> STATE_NAMES = MessageUtils.findMessageNames(
+                new Class[]{EthernetManager.class}, new String[]{"STATE_"});
+
+        private static final SparseArray<String> ROLE_NAMES = MessageUtils.findMessageNames(
+                new Class[]{EthernetManager.class}, new String[]{"ROLE_"});
+
+        private String stateName(int state) {
+            return STATE_NAMES.get(state, Integer.toString(state));
+        }
+
+        private String roleName(int role) {
+            return ROLE_NAMES.get(role, Integer.toString(role));
+        }
+
+        @Override
+        public void onInterfaceStateChanged(String iface, int state, int role,
+                IpConfiguration configuration) {
+            Log.d(TAG, iface + " " + stateName(state) + " " + roleName(role)
+                    + " " + configuration);
+        }
+    }
+
+    private final DevToolsEthListener mEthListener = new DevToolsEthListener();
+
+    public Connectivity() {
+        super();
+        addRequestableNetwork(NET_CAPABILITY_MMS, R.id.request_mms, R.id.release_mms,
+                R.id.mms_progress);
+        addRequestableNetwork(NET_CAPABILITY_SUPL, R.id.request_supl, R.id.release_supl,
+                R.id.supl_progress);
+        addRequestableNetwork(NET_CAPABILITY_INTERNET, R.id.request_cell, R.id.release_cell,
+                R.id.cell_progress);
+
+        // Make bound requests use cell data.
+        mBoundTestNetwork = mRequestableNetworks.get(mRequestableNetworks.size() - 1);
+
+        NetworkRequest wifiRequest = new NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            .build();
+        addRequestableNetwork(new RequestableNetwork(wifiRequest,
+                R.id.request_wifi, R.id.release_wifi, R.id.wifi_progress));
+    }
+
+    final NetworkRequest mEmptyRequest = new NetworkRequest.Builder().clearCapabilities().build();
 
     @Override
     public void onCreate(Bundle icicle) {
@@ -258,13 +428,19 @@ public class Connectivity extends Activity {
         setContentView(R.layout.connectivity);
 
         mWm = (WifiManager)getSystemService(Context.WIFI_SERVICE);
+        mWml = mWm.createMulticastLock(TAG);
+        mWml.setReferenceCounted(false);
         mPm = (PowerManager)getSystemService(Context.POWER_SERVICE);
         mCm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
         IBinder b = ServiceManager.getService(Context.NETWORKMANAGEMENT_SERVICE);
         mNetd = INetworkManagementService.Stub.asInterface(b);
+        mEm = getSystemService(EthernetManager.class);
 
         findViewById(R.id.enableWifi).setOnClickListener(mClickListener);
         findViewById(R.id.disableWifi).setOnClickListener(mClickListener);
+        findViewById(R.id.acquireWifiMulticastLock).setOnClickListener(mClickListener);
+        findViewById(R.id.releaseWifiMulticastLock).setOnClickListener(mClickListener);
+        findViewById(R.id.releaseWifiMulticastLock).setEnabled(false);
 
         findViewById(R.id.startDelayedCycle).setOnClickListener(mClickListener);
         findViewById(R.id.stopDelayedCycle).setOnClickListener(mClickListener);
@@ -300,24 +476,51 @@ public class Connectivity extends Activity {
         findViewById(R.id.startTdls).setOnClickListener(mClickListener);
         findViewById(R.id.stopTdls).setOnClickListener(mClickListener);
 
-        findViewById(R.id.start_mms).setOnClickListener(mClickListener);
-        findViewById(R.id.stop_mms).setOnClickListener(mClickListener);
-        findViewById(R.id.start_hipri).setOnClickListener(mClickListener);
-        findViewById(R.id.stop_hipri).setOnClickListener(mClickListener);
-        findViewById(R.id.crash).setOnClickListener(mClickListener);
+        findViewById(R.id.report_all_bad).setOnClickListener(mClickListener);
 
-        findViewById(R.id.add_default_route).setOnClickListener(mClickListener);
-        findViewById(R.id.remove_default_route).setOnClickListener(mClickListener);
+        findViewById(R.id.default_request).setOnClickListener(mClickListener);
         findViewById(R.id.bound_http_request).setOnClickListener(mClickListener);
         findViewById(R.id.bound_socket_request).setOnClickListener(mClickListener);
-        findViewById(R.id.routed_http_request).setOnClickListener(mClickListener);
-        findViewById(R.id.routed_socket_request).setOnClickListener(mClickListener);
-        findViewById(R.id.default_request).setOnClickListener(mClickListener);
-        findViewById(R.id.default_socket).setOnClickListener(mClickListener);
 
-        registerReceiver(mReceiver, new IntentFilter(CONNECTIVITY_TEST_ALARM));
+        findViewById(R.id.link_stats).setOnClickListener(mClickListener);
+
+        for (RequestableNetwork network : mRequestableNetworks) {
+            network.setRequested(false);
+            network.addOnClickListener();
+        }
+        onHttpRequestResults(null);
+
+        IntentFilter broadcastFilter = new IntentFilter();
+        broadcastFilter.addAction(CONNECTIVITY_ACTION);
+        broadcastFilter.addAction(CONNECTIVITY_TEST_ALARM);
+        broadcastFilter.addAction(NETWORK_CONDITIONS_MEASURED);
+
+        registerReceiver(mReceiver, broadcastFilter);
+
+        mLinkStatsResults = (TextView)findViewById(R.id.stats);
+        mLinkStatsResults.setVisibility(View.VISIBLE);
+
+        mHttpRequestResults = (TextView)findViewById(R.id.http_response);
+        mHttpRequestResults.setVisibility(View.VISIBLE);
+
+        mCallback = new DevToolsNetworkCallback();
+        mCm.registerNetworkCallback(mEmptyRequest, mCallback);
+
+        mEm.addInterfaceStateListener(this::runOnUiThread, mEthListener);
     }
 
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        for (RequestableNetwork network : mRequestableNetworks) {
+            network.release();
+        }
+        mCm.unregisterNetworkCallback(mCallback);
+        mCallback = null;
+        mEm.removeInterfaceStateListener(mEthListener);
+        unregisterReceiver(mReceiver);
+        mWml.release();
+    }
 
     @Override
     public void onResume() {
@@ -333,6 +536,10 @@ public class Connectivity extends Activity {
                     break;
                 case R.id.disableWifi:
                     mWm.setWifiEnabled(false);
+                    break;
+                case R.id.acquireWifiMulticastLock:
+                case R.id.releaseWifiMulticastLock:
+                    onWifiMulticastLock(v.getId() == R.id.acquireWifiMulticastLock);
                     break;
                 case R.id.startDelayedCycle:
                     onStartDelayedCycle();
@@ -355,48 +562,20 @@ public class Connectivity extends Activity {
                 case R.id.stopTdls:
                     onStopTdls();
                     break;
-                case R.id.start_mms:
-                    mCm.startUsingNetworkFeature(ConnectivityManager.TYPE_MOBILE,
-                            Phone.FEATURE_ENABLE_MMS);
-                    break;
-                case R.id.stop_mms:
-                    mCm.stopUsingNetworkFeature(ConnectivityManager.TYPE_MOBILE,
-                            Phone.FEATURE_ENABLE_MMS);
-                    break;
-                case R.id.default_socket:
-                    onDefaultSocket();
-                    break;
                 case R.id.default_request:
-                    onDefaultRequest();
-                    break;
-                case R.id.routed_socket_request:
-                    onRoutedSocketRequest();
-                    break;
-                case R.id.routed_http_request:
-                    onRoutedHttpRequest();
-                    break;
-                case R.id.bound_socket_request:
-                    onBoundSocketRequest();
+                    onHttpRequest(DEFAULT);
                     break;
                 case R.id.bound_http_request:
-                    onBoundHttpRequest();
+                    onHttpRequest(HTTPS);
                     break;
-                case R.id.remove_default_route:
-                    onRemoveDefaultRoute();
+                case R.id.bound_socket_request:
+                    onHttpRequest(SOCKET);
                     break;
-                case R.id.add_default_route:
-                    onAddDefaultRoute();
+                case R.id.report_all_bad:
+                    onReportAllBad();
                     break;
-                case R.id.crash:
-                    onCrash();
-                    break;
-                case R.id.start_hipri:
-                    mCm.startUsingNetworkFeature(ConnectivityManager.TYPE_MOBILE,
-                            Phone.FEATURE_ENABLE_HIPRI);
-                    break;
-                case R.id.stop_hipri:
-                    mCm.stopUsingNetworkFeature(ConnectivityManager.TYPE_MOBILE,
-                            Phone.FEATURE_ENABLE_HIPRI);
+                case R.id.link_stats:
+                    onLinkStats();
                     break;
             }
         }
@@ -452,7 +631,8 @@ public class Connectivity extends Activity {
         i.putExtra(TEST_ALARM_OFF_EXTRA, Long.toString(mSCOffDuration));
         i.putExtra(TEST_ALARM_CYCLE_EXTRA, Integer.toString(mSCCycleCount));
 
-        PendingIntent p = PendingIntent.getBroadcast(this, 0, i, PendingIntent.FLAG_UPDATE_CURRENT);
+        PendingIntent p = PendingIntent.getBroadcast(this, 0, i,
+                PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
 
         am.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + delayMs, p);
     }
@@ -460,10 +640,11 @@ public class Connectivity extends Activity {
     private void onStopScreenCycle() {
     }
 
-    private void onCrash() {
-        ConnectivityManager foo = null;
-        foo.startUsingNetworkFeature(ConnectivityManager.TYPE_MOBILE,
-                Phone.FEATURE_ENABLE_MMS);
+    private void onReportAllBad() {
+        Network[] networks = mCm.getAllNetworks();
+        for (Network network : networks) {
+            mCm.reportBadNetwork(network);
+        }
     }
 
     private void onStartScanCycle() {
@@ -527,190 +708,135 @@ public class Connectivity extends Activity {
         }
     }
 
-    private void onAddDefaultRoute() {
+    private void onLinkStats() {
+        Log.e(TAG, "LINK STATS:  ");
         try {
-            int netId = Integer.valueOf(((TextView) findViewById(R.id.netid)).getText().toString());
-            mNetd.addRoute(netId, new RouteInfo((LinkAddress) null,
-                    NetworkUtils.numericToInetAddress("8.8.8.8")));
-        } catch (Exception e) {
-            Log.e(TAG, "onAddDefaultRoute got exception: " + e.toString());
-        }
-    }
-
-    private void onRemoveDefaultRoute() {
-        try {
-            int netId = Integer.valueOf(((TextView) findViewById(R.id.netid)).getText().toString());
-            mNetd.removeRoute(netId, new RouteInfo((LinkAddress) null,
-                    NetworkUtils.numericToInetAddress("8.8.8.8")));
-        } catch (Exception e) {
-            Log.e(TAG, "onRemoveDefaultRoute got exception: " + e.toString());
-        }
-    }
-
-    private void onRoutedHttpRequest() {
-        onRoutedRequest(HTTP);
-    }
-
-    private void onRoutedSocketRequest() {
-        onRoutedRequest(SOCKET);
-    }
-
-    private final static int SOCKET = 1;
-    private final static int HTTP   = 2;
-
-    private void onRoutedRequest(int type) {
-        String url = "www.google.com";
-
-        InetAddress inetAddress = null;
-        try {
-            inetAddress = InetAddress.getByName(url);
-        } catch (Exception e) {
-            Log.e(TAG, "error fetching address for " + url);
-            return;
-        }
-
-        mCm.requestRouteToHostAddress(ConnectivityManager.TYPE_MOBILE_HIPRI, inetAddress);
-
-        switch (type) {
-            case SOCKET:
-                onBoundSocketRequest();
-                break;
-            case HTTP:
-                HttpGet get = new HttpGet("http://" + url);
-                HttpClient client = new DefaultHttpClient();
-                try {
-                    HttpResponse httpResponse = client.execute(get);
-                    Log.d(TAG, "routed http request gives " + httpResponse.getStatusLine());
-                } catch (Exception e) {
-                    Log.e(TAG, "routed http request exception = " + e);
+            mWm.getWifiActivityEnergyInfoAsync(getMainExecutor(), info -> {
+                if (info != null) {
+                    mLinkStatsResults.setText(" power " + info.toString());
+                } else {
+                    mLinkStatsResults.setText(" null! ");
                 }
+            });
+        } catch (Exception e) {
+            mLinkStatsResults.setText(" failed! " + e.toString());
         }
-
     }
 
-    private void onBoundHttpRequest() {
-        NetworkInterface networkInterface = null;
+
+    private final static int DEFAULT = 0;
+    private final static int SOCKET = 1;
+    private final static int HTTPS  = 2;
+
+    private void onHttpRequestResults(final String results) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                boolean enabled = !mRequestRunning;
+                findViewById(R.id.default_request).setEnabled(enabled);
+
+                enabled = !mRequestRunning && mBoundTestNetwork.getNetwork() != null;
+                findViewById(R.id.bound_http_request).setEnabled(enabled);
+                findViewById(R.id.bound_socket_request).setEnabled(enabled);
+
+                if (!TextUtils.isEmpty(results) || !mRequestRunning) {
+                    ((TextView) findViewById(R.id.http_response)).setText(results);
+                }
+            }
+        });
+    }
+
+    private String doSocketRequest(Network network, String host, String path) throws IOException {
+        Socket sock = network.getSocketFactory().createSocket(host, 80);
         try {
-            networkInterface = NetworkInterface.getByName("rmnet0");
-            Log.d(TAG, "networkInterface is " + networkInterface);
-        } catch (Exception e) {
-            Log.e(TAG, " exception getByName: " + e);
-            return;
-        }
-        if (networkInterface != null) {
-            Enumeration inetAddressess = networkInterface.getInetAddresses();
-            while(inetAddressess.hasMoreElements()) {
-                Log.d(TAG, " inetAddress:" + ((InetAddress)inetAddressess.nextElement()));
+          sock.setSoTimeout(5000);
+          OutputStreamWriter writer = new OutputStreamWriter(sock.getOutputStream());
+          String request = String.format(
+                  "GET %s HTTP/1.1\nHost: %s\nConnection: close\n\n", path, host);
+          writer.write(request);
+          writer.flush();
+          BufferedReader reader = new BufferedReader(new InputStreamReader(sock.getInputStream()));
+          String line = reader.readLine();
+
+          if (line == null || !line.startsWith("HTTP/1.1 200")) {
+              // Error.
+              return "Error: " + line;
+          }
+
+          do {
+              // Consume headers.
+              line = reader.readLine();
+          } while (!TextUtils.isEmpty(line));
+
+          // Return first line of body.
+          return reader.readLine();
+        } finally {
+            if (sock != null) {
+                IoUtils.closeQuietly(sock);
             }
         }
-
-        HttpParams httpParams = new BasicHttpParams();
-        if (networkInterface != null) {
-            ConnRouteParams.setLocalAddress(httpParams,
-                    networkInterface.getInetAddresses().nextElement());
-        }
-        HttpGet get = new HttpGet("http://www.bbc.com");
-        HttpClient client = new DefaultHttpClient(httpParams);
-        try {
-            HttpResponse response = client.execute(get);
-            Log.d(TAG, "response code = " + response.getStatusLine());
-        } catch (Exception e) {
-            Log.e(TAG, "Exception = "+ e );
-        }
     }
 
-    private void onBoundSocketRequest() {
-        NetworkInterface networkInterface = null;
-        try {
-            networkInterface = NetworkInterface.getByName("rmnet0");
-        } catch (Exception e) {
-            Log.e(TAG, "exception getByName: " + e);
-            return;
-        }
-        if (networkInterface == null) {
-            try {
-                Log.d(TAG, "getting any networkInterface");
-                networkInterface = NetworkInterface.getNetworkInterfaces().nextElement();
-            } catch (Exception e) {
-                Log.e(TAG, "exception getting any networkInterface: " + e);
-                return;
+    private void onHttpRequest(final int type) {
+        mRequestRunning = true;
+        onHttpRequestResults(null);
+
+        Thread requestThread = new Thread() {
+            public void run() {
+                final String path = "/ip.js?fmt=text";
+                final String randomHost =
+                        "h" + Integer.toString(new Random().nextInt()) + ".ds.ipv6test.google.com";
+                final String fixedHost = "google-ipv6test.appspot.com";
+
+                Network network = mBoundTestNetwork.getNetwork();
+                HttpURLConnection conn = null;
+                InputStreamReader in = null;
+
+                try {
+                    final URL httpsUrl = new URL("https", fixedHost, path);
+                    BufferedReader reader;
+
+                    switch (type) {
+                        case DEFAULT:
+                            conn = (HttpURLConnection) httpsUrl.openConnection(Proxy.NO_PROXY);
+                            in = new InputStreamReader(conn.getInputStream());
+                            reader = new BufferedReader(in);
+                            onHttpRequestResults(reader.readLine());
+                            break;
+                        case SOCKET:
+                            String response = doSocketRequest(network, randomHost, path);
+                            onHttpRequestResults(response);
+                            break;
+                        case HTTPS:
+                            conn = (HttpURLConnection) network.openConnection(httpsUrl,
+                                    Proxy.NO_PROXY);
+                            in = new InputStreamReader(conn.getInputStream());
+                            reader = new BufferedReader(in);
+                            onHttpRequestResults(reader.readLine());
+                            break;
+                        default:
+                            throw new IllegalArgumentException("Cannot happen");
+                    }
+                } catch(IOException e) {
+                    onHttpRequestResults("Error! ");
+                } finally {
+                    mRequestRunning = false;
+                    if (in != null) IoUtils.closeQuietly(in);
+                    if (conn != null) conn.disconnect();
+                }
             }
-        }
-        if (networkInterface == null) {
-            Log.e(TAG, "couldn't find a local interface");
-            return;
-        }
-        Enumeration inetAddressess = networkInterface.getInetAddresses();
-        while(inetAddressess.hasMoreElements()) {
-            Log.d(TAG, " addr:" + ((InetAddress)inetAddressess.nextElement()));
-        }
-        InetAddress local = null;
-        InetAddress remote = null;
-        try {
-            local = networkInterface.getInetAddresses().nextElement();
-        } catch (Exception e) {
-            Log.e(TAG, "exception getting local InetAddress: " + e);
-            return;
-        }
-        try {
-            remote = InetAddress.getByName("www.flickr.com");
-        } catch (Exception e) {
-            Log.e(TAG, "exception getting remote InetAddress: " + e);
-            return;
-        }
-        Log.d(TAG, "remote addr ="+remote);
-        Log.d(TAG, "local addr ="+local);
-        Socket socket = null;
-        try {
-            socket = new Socket(remote, 80, local, 6000);
-        } catch (Exception e) {
-            Log.e(TAG, "Exception creating socket: " + e);
-            return;
-        }
-        try {
-            PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
-            out.println("Hi flickr");
-        } catch (Exception e) {
-            Log.e(TAG, "Exception writing to socket: " + e);
-            return;
-        }
+        };
+        requestThread.start();
     }
 
-    private void onDefaultRequest() {
-        HttpParams params = new BasicHttpParams();
-        HttpGet get = new HttpGet("http://www.cnn.com");
-        HttpClient client = new DefaultHttpClient(params);
-        try {
-            HttpResponse response = client.execute(get);
-            Log.e(TAG, "response code = " + response.getStatusLine());
-        } catch (Exception e) {
-            Log.e(TAG, "Exception = " + e);
+    private void onWifiMulticastLock(boolean enable) {
+        Log.d(TAG, (enable ? "Acquiring" : "Releasing") + " wifi multicast lock");
+        if (enable) {
+            mWml.acquire();
+        } else {
+            mWml.release();
         }
-    }
-
-    private void onDefaultSocket() {
-        InetAddress remote = null;
-        try {
-            remote = InetAddress.getByName("www.flickr.com");
-        } catch (Exception e) {
-            Log.e(TAG, "exception getting remote InetAddress: " + e);
-            return;
-        }
-        Log.e(TAG, "remote addr =" + remote);
-        Socket socket = null;
-        try {
-            socket = new Socket(remote, 80);
-        } catch (Exception e) {
-            Log.e(TAG, "Exception creating socket: " + e);
-            return;
-        }
-        try {
-            PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
-            out.println("Hi flickr");
-            Log.e(TAG, "written");
-        } catch (Exception e) {
-            Log.e(TAG, "Exception writing to socket: " + e);
-            return;
-        }
+        findViewById(R.id.acquireWifiMulticastLock).setEnabled(!enable);
+        findViewById(R.id.releaseWifiMulticastLock).setEnabled(enable);
     }
 }

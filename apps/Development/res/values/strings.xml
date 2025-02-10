@@ -23,6 +23,8 @@
 
     <string name="enable_wifi">Enable Wifi</string>
     <string name="disable_wifi">Disable Wifi</string>
+    <string name="acquire_wifi_multicast_lock">Acquire Multicast Lock</string>
+    <string name="release_wifi_multicast_lock">Release Multicast Lock</string>
     <string name="wifi_on_duration">Wifi on (ms): </string>
     <string name="wifi_off_duration">Wifi off (ms): </string>
     <string name="wifi_cycles_done">Cycles done: </string>
@@ -33,26 +35,26 @@
     <string name="start_scan">Start Scan</string>
     <string name="scan_cycles">Scan Cycles: </string>
     <string name="disconnect">Disconnect</string>
+    <string name="link_stats">Link Stats</string>
+    <string name="stats_results"> results </string>
 
     <string name="start_tdls">Start TDLS</string>
     <string name="stop_tdls">Stop TDLS</string>
     <string name="mac_tdls"> IP/MAC: </string>
 
-    <string name="start_mms">Start MMS</string>
-    <string name="stop_mms">Stop MMS</string>
-    <string name="start_hipri">Start HiPri</string>
-    <string name="stop_hipri">Stop HiPri</string>
-    <string name="crash">CRASH</string>
-    <string name="netid">NetId</string>
-    <string name="add_default_route">Add Default Route</string>
-    <string name="remove_default_route">Remove Default Route</string>
-    <string name="default_request">Make a http request</string>
-    <string name="default_socket">Make a raw request</string>
+    <string name="request_mms">Request MMS</string>
+    <string name="release_mms">Release MMS</string>
+    <string name="request_supl">Request SUPL</string>
+    <string name="release_supl">Release SUPL</string>
+    <string name="request_cell">Request cell</string>
+    <string name="release_cell">Release cell</string>
+    <string name="request_wifi">Request Wi-Fi</string>
+    <string name="release_wifi">Release Wi-Fi</string>
+    <string name="report_all_bad">Report all bad</string>
+
+    <string name="default_request">Make http request</string>
     <string name="bound_http_request">Make bound http request</string>
     <string name="bound_socket_request">Make bound socket request</string>
-    <string name="routed_http_request">Make routed http request</string>
-    <string name="routed_socket_request">Make routed socket request</string>
-
 
         <string name="device_info_default">unknown</string>
         <string name="device_info_uptime">Uptime</string>
@@ -105,23 +107,6 @@
     <string name="launch_singleTask">Single Task</string>
     <string name="launch_singleInstance">Single Instance</string>
     <string name="launch_unknown">"(Unknown)"</string>
-
-    <string name="development_settings_show_cpu_text">Show CPU usage</string>
-    <string name="development_settings_always_finish_text">Immediately destroy activities</string>
-    <string name="development_settings_show_load_text">Show running processes</string>
-    <string name="development_settings_show_updates_text">Show screen updates</string>
-    <string name="development_settings_compatibility_mode_text">Disable compatibility mode</string>
-    <string name="development_settings_compatibility_mode_toast">Reboot required for
-            change to take effect.</string>
-    <string name="development_settings_enable_gl_text">Enable OpenGL ES (reboot needed)</string>
-    <string name="development_settings_allow_mock_location_text">Allow mock locations for testing</string>
-    <string name="development_settings_wait_for_debugger_text">Wait for debugger</string>
-    <string name="development_settings_show_background_text">Show background</string>
-    <string name="development_settings_show_xmpp_text">Show GTalk service connection status</string>
-    <string name="development_settings_debug_app_label_text">Debug App:</string>
-    <string name="development_settings_show_sleep_text">Show sleep state on LED</string>
-    <string name="development_settings_keep_screen_on_text">Keep screen on while plugged in</string>
-    <string name="development_settings_window_orientation_listener_log">Enable window orientation listener log</string>
 
     <string name="monkey_screen_initialActivity_text"></string>
     <string name="monkey_screen_number_of_events_label">Number of Events: </string>
@@ -227,6 +212,7 @@
     <string name="bad_behavior_anr_service_label">ANR starting a Service</string>
     <string name="bad_behavior_anr_system_label">System ANR (in ActivityManager)</string>
     <string name="bad_behavior_wedge_system_label">Wedge system (5 minute system ANR)</string>
+    <string name="bad_behavior_broadcast_flood">Flood the system with broadcasts</string>
 
     <!-- CacheAbuser -->
     <string name="cache_abuser_start_internal_abuse">Quickly abuse internal cache</string>
@@ -239,4 +225,8 @@
     <string name="scancard">Scan SD card</string>
     <string name="numsongs"># of albums</string>
     <string name="insertbutton">Insert %1s albums</string>
+
+    <!-- HttpEngineActivity -->
+    <string name="urlText">Enter a URL</string>
+    <string name="postText">Enter post data (leave it blank for GET request)</string>
 </resources>

@@ -16,7 +16,7 @@
 
 package com.android.idegen;
 
-import com.google.common.base.Objects;
+import com.google.common.base.MoreObjects;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Splitter;
 import com.google.common.base.Strings;
@@ -80,7 +80,7 @@ public class MakeFileParser {
 
     @Override
     public String toString() {
-        return Objects.toStringHelper(this).add("values", values).toString();
+        return MoreObjects.toStringHelper(this).add("values", values).toString();
     }
 
     private class MakeFileLineProcessor implements LineProcessor<Object> {
@@ -150,7 +150,7 @@ public class MakeFileParser {
                 lineBuffer.append(" ");
             }
             if (line.endsWith("\\")) {
-                lineBuffer.append(line.substring(0, line.length() - 2).trim());
+                lineBuffer.append(line.substring(0, line.length() - 1).trim());
             } else {
                 lineBuffer.append(line);
             }
@@ -174,7 +174,7 @@ public class MakeFileParser {
 
         private String findVariables(String value) {
 
-            int variableStart = value.indexOf('$');
+            int variableStart = value.indexOf("$(");
             // Keep going until we substituted all variables.
             while (variableStart > -1) {
                 StringBuilder sb = new StringBuilder();
@@ -193,7 +193,7 @@ public class MakeFileParser {
                     sb.append(value.substring(variableEnd + 1));
                 }
                 value = sb.toString();
-                variableStart = value.indexOf('$');
+                variableStart = value.indexOf("$(");
             }
             return value;
         }

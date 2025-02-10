@@ -17,21 +17,27 @@
 package com.example.android.softkeyboard;
 
 import android.app.Dialog;
+import android.content.Context;
 import android.inputmethodservice.InputMethodService;
 import android.inputmethodservice.Keyboard;
 import android.inputmethodservice.KeyboardView;
+import android.os.Build;
 import android.os.IBinder;
 import android.text.InputType;
 import android.text.method.MetaKeyKeyListener;
+import android.view.Display;
 import android.view.KeyCharacterMap;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.Window;
+import android.view.WindowManager;
 import android.view.inputmethod.CompletionInfo;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
 import android.view.inputmethod.InputMethodSubtype;
+
+import androidx.annotation.NonNull;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -43,7 +49,7 @@ import java.util.List;
  * a basic example for how you would get started writing an input method, to
  * be fleshed out as appropriate.
  */
-public class SoftKeyboard extends InputMethodService 
+public class SoftKeyboard extends InputMethodService
         implements KeyboardView.OnKeyboardActionListener {
     static final boolean DEBUG = false;
     
@@ -88,12 +94,46 @@ public class SoftKeyboard extends InputMethodService
         mInputMethodManager = (InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
         mWordSeparators = getResources().getString(R.string.word_separators);
     }
+
+    /**
+     * Returns the context object whose resources are adjusted to match the metrics of the display.
+     *
+     * Note that before {@link android.os.Build.VERSION_CODES#KITKAT}, there is no way to support
+     * multi-display scenarios, so the context object will just return the IME context itself.
+     *
+     * With initiating multi-display APIs from {@link android.os.Build.VERSION_CODES#KITKAT}, the
+     * context object has to return with re-creating the display context according the metrics
+     * of the display in runtime.
+     *
+     * Starts from {@link android.os.Build.VERSION_CODES#S_V2}, the returning context object has
+     * became to IME context self since it ends up capable of updating its resources internally.
+     *
+     * @see {@link Context#createDisplayContext(Display)}
+     */
+    @NonNull Context getDisplayContext() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT) {
+            // createDisplayContext is not available.
+            return this;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S_V2) {
+            // IME context sources is now managed by WindowProviderService from Android 12L.
+            return this;
+        }
+        // An issue in Q that non-activity components Resources / DisplayMetrics in
+        // Context doesn't well updated when the IME window moving to external display.
+        // Currently we do a workaround is to create new display context directly and re-init
+        // keyboard layout with this context.
+        final WindowManager wm = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
+        return createDisplayContext(wm.getDefaultDisplay());
+    }
     
     /**
      * This is the point where you can do all of your UI initialization.  It
      * is called after creation and any configuration change.
      */
     @Override public void onInitializeInterface() {
+        final Context displayContext = getDisplayContext();
+
         if (mQwertyKeyboard != null) {
             // Configuration changes can happen after the keyboard gets recreated,
             // so we need to be able to re-build the keyboards if the available
@@ -102,9 +142,9 @@ public class SoftKeyboard extends InputMethodService
             if (displayWidth == mLastDisplayWidth) return;
             mLastDisplayWidth = displayWidth;
         }
-        mQwertyKeyboard = new LatinKeyboard(this, R.xml.qwerty);
-        mSymbolsKeyboard = new LatinKeyboard(this, R.xml.symbols);
-        mSymbolsShiftedKeyboard = new LatinKeyboard(this, R.xml.symbols_shift);
+        mQwertyKeyboard = new LatinKeyboard(displayContext, R.xml.qwerty);
+        mSymbolsKeyboard = new LatinKeyboard(displayContext, R.xml.symbols);
+        mSymbolsShiftedKeyboard = new LatinKeyboard(displayContext, R.xml.symbols_shift);
     }
     
     /**
@@ -133,7 +173,7 @@ public class SoftKeyboard extends InputMethodService
      * be generated, like {@link #onCreateInputView}.
      */
     @Override public View onCreateCandidatesView() {
-        mCandidateView = new CandidateView(this);
+        mCandidateView = new CandidateView(getDisplayContext());
         mCandidateView.setService(this);
         return mCandidateView;
     }

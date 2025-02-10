@@ -14,6 +14,7 @@
  See the License for the specific language governing permissions and
  limitations under the License.
 -->
+
 <resources>
     <string name="app_name">ActivitySceneTransitionBasic</string>
     <string name="intro_message">
@@ -21,9 +22,9 @@
         
             
             Demonstrates how to the use Activity scene transitions when transitions
-            from one Activity to another. Uses a combination of moveImage and changeBounds
-            to nicely transition a grid of images to an Activity with a large image and detail
-            text.
+            from one Activity to another. Uses a combination of changeImageTransform and
+            changeBounds to nicely transition a grid of images to an Activity with a large image
+            and detail text.
             
         
         ]]>

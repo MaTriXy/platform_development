@@ -13,7 +13,6 @@
                 <action android:name="android.bluetooth.adapter.action.LOCAL_NAME_CHANGED" />
 
                 <action android:name="android.bluetooth.device.action.FOUND" />
-                <action android:name="android.bluetooth.device.action.DISAPPEARED" />
                 <action android:name="android.bluetooth.device.action.CLASS_CHANGED" />
                 <action android:name="android.bluetooth.device.action.ACL_CONNECTED" />
                 <action android:name="android.bluetooth.device.action.ACL_DISCONNECT_REQUESTED" />
@@ -27,8 +26,6 @@
 
                 <action android:name="android.bluetooth.headset.action.STATE_CHANGED" />
                 <action android:name="android.bluetooth.headset.action.AUDIO_STATE_CHANGED" />
-
-                <action android:name="android.bluetooth.a2dp.action.SINK_STATE_CHANGED" />
 
                 <action android:name="android.bluetooth.devicepicker.action.LAUNCH" />
                 <action android:name="android.bluetooth.devicepicker.action.DEVICE_SELECTED" />

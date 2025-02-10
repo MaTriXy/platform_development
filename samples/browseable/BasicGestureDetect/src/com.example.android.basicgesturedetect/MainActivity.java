@@ -15,8 +15,6 @@
 */
 
 
-
-
 package com.example.android.basicgesturedetect;
 
 import android.graphics.Color;

@@ -62,6 +62,50 @@
         instead of programmatically.</string>
     <string name="screen_orientation">Screen Orientation</string>
 
+    <string name="activity_picture_in_picture">App/Activity/Picture in Picture</string>
+    <string name="activity_picture_in_picture_auto_pip_toggle">Enable auto PiP</string>
+    <string name="activity_picture_in_picture_source_rect_hint_toggle">Enable source rect hint</string>
+    <string name="activity_picture_in_picture_seamless_resize_toggle">Enable seamless resize</string>
+    <string name="activity_picture_in_picture_enter_pip_on_back_toggle">Enter PiP on back</string>
+    <string name="activity_picture_in_picture_placeholder_text">
+            This string should be invisible during the enter-pip animation
+    </string>
+    <string name="enter_content_pip">Enter content PiP</string>
+    <string name="enter_picture_in_picture">Manually enter PiP</string>
+    <string name="action_custom_close">Close PiP</string>
+    <string name="action_move_to_back">Background PiP</string>
+    <string name="label_current_position">Current position</string>
+    <string name="label_exit_position">Exit position</string>
+    <string name="label_position_start">Start</string>
+    <string name="label_position_end">End</string>
+    <string name="label_aspect_ratio">Aspect Ratio</string>
+    <!-- List of aspect ratio to demo, we use Rational.parseRational to parse what's inside () -->
+    <string-array name="aspect_ratio_list">
+        <item>Extreme wide (21/9)</item>
+        <item>Video (16/9)</item>
+        <item>Square (1/1)</item>
+        <item>Video call (9/16)</item>
+        <item>Extreme tall (9/21)</item>
+    </string-array>
+
+    <string name="activity_keep_clear">App/Activity/Keep Clear Rects</string>
+    <string name="keep_clear_property_set">
+        This view has android:preferKeepClear property set.
+    </string>
+    <string name="keep_clear_set_prefer_keep_clear_toggle">
+        Set the bottom right view as keep clear area, via setPreferKeepClear;
+    </string>
+    <string name="keep_clear_set_bottom_right_rectangle_keep_clear_toggle">
+        Set the bottom right view as keep clear area, via setPreferKeepClearRects.
+    </string>
+    <string name="keep_clear_view_bottom_right">
+        Use toggles to turn this into keep clear area.
+    </string>
+
+    <string name="activity_max_aspect_ratio_square">App/Activity/Max Aspect Ratio/1:1</string>
+    <string name="activity_max_aspect_ratio_16to9">App/Activity/Max Aspect Ratio/16:9</string>
+    <string name="activity_max_aspect_ratio_any">App/Activity/Max Aspect Ratio/Any</string>
+
     <string name="activity_translucent">App/Activity/Translucent</string>
     <string name="translucent_background">Example of how you can make an
             activity have a translucent background, compositing over
@@ -77,6 +121,7 @@
     <string name="activity_modern_animation_zoom">Modern zoom in</string>
     <string name="activity_scale_up_animation">Scale up</string>
     <string name="activity_zoom_thumbnail_animation">Thumbnail zoom</string>
+    <string name="activity_no_animation">No Animation</string>
 
     <string name="activity_save_restore">App/Activity/Save &amp; Restore State</string>
     <string name="save_restore_msg">Demonstration of saving and restoring activity state in onSaveInstanceState() and onCreate().</string>
@@ -301,6 +346,19 @@
     <string name="service_created">Service created.</string>
     <string name="service_destroyed">Service destroyed.</string>
 
+    <string name="job_work_service_label">Job Work Service</string>
+
+    <string name="activity_job_work_service">App/Job/Job Work Service Controller</string>
+    <string name="job_work_service_controller">This demonstrates how
+        work can be enqueued and executed by a job, running work in the job until
+        everything is complete.
+    </string>
+    <string name="enqueue1_job">Enqueue \"One\"</string>
+    <string name="enqueue2_job">Enqueue \"Two\"</string>
+    <string name="enqueue3_job">Enqueue \"Three\"</string>
+    <string name="job_service_created">JobService created.</string>
+    <string name="job_service_destroyed">JobService destroyed.</string>
+
     <string name="foreground_service_started">Service is in the foreground</string>
     <string name="foreground_service_label">Sample Foreground Service</string>
 
@@ -308,7 +366,11 @@
     <string name="foreground_service_controller">This demonstrates how you can
             implement services that run in the foreground when needed.</string>
     <string name="start_service_foreground">Start Service Foreground</string>
+    <string name="start_service_foreground_wakelock">Start Service Foreground w/Wakelock</string>
     <string name="start_service_background">Start Service Background</string>
+    <string name="start_service_background_wakelock">Start Service Background w/Wakelock</string>
+    <string name="start_service_foreground_2">Start Service Foreground 2</string>
+    <string name="start_service_foreground_2_alarm">Start Service Foreground 2 Via Alarm</string>
 
     <string name="activity_isolated_service_controller">App/Service/Isolated Service Controller</string>
     <string name="isolated_service_controller">This demonstrates the use of android:isolatedProcess
@@ -331,6 +393,7 @@
     <string name="alarm_controller">This demonstrates how to schedule and handle
         one-shot and repeating alarms.</string>
     <string name="one_shot_alarm">One Shot Alarm</string>
+    <string name="one_shot_while_idle_alarm">One Shot While-Idle Alarm</string>
     <string name="start_repeating_alarm">Start Repeating Alarm</string>
     <string name="stop_repeating_alarm">Stop Repeating Alarm</string>
     <string name="one_shot_scheduled">One-shot alarm will go off in 30 seconds based on
@@ -370,6 +433,12 @@
 
     <string name="notifying_service_controller">This service will update a status bar notification
                   every 5 seconds for a minute</string>
+
+    <string name="notification_background_service">This shows how you can use a notification to
+        send a broadcast and allow you to start a service even if your app is in the
+        background.</string>
+    <string name="notify_bg">Post notification</string>
+    <string name="notification_background_label">Notification to background</string>
 
     <string name="activity_custom_title">App/Activity/Custom Title</string>
     <string name="custom_title_left">Left is best</string>
@@ -421,11 +490,14 @@
     <string name="styled_text">Plain, <b>bold</b>, <i>italic</i>, <b><i>bold-italic</i></b></string>
     <string name="styled_text_prog">Assigned programmatically:</string>
 
-    <string name="activity_text_undo">Content/Undo Manager/Text</string>
-    <string name="text_undo_msg">Demonstrates simple use of UndoManager with text editing
-            in a TextView.</string>
-    <string name="undo">Undo</string>
-    <string name="redo">Redo</string>
+    <string name="activity_text_undo">Content/Undo</string>
+    <string name="text_undo_default_edit_msg">TextView with the default Control-Z undo behavior.</string>
+    <string name="text_undo_set_text">SetText</string>
+    <string name="text_undo_append_text">Append</string>
+    <string name="text_undo_insert_text">Insert</string>
+    <string name="text_undo_undo_disabled_msg">TextView with undo disabled.</string>
+    <string name="text_undo_length_limit_msg">TextView with a length limit InputFilter.</string>
+    <string name="text_undo_credit_card_msg">Credit card input field with a TextWatcher.</string>
 
     <string name="activity_resources_layout_reference">Content/Resources/Layout Reference</string>
     <string name="resources_layout_reference_description">Shows how to write layout
@@ -456,9 +528,17 @@
     <string name="pick_phone">Pick a Phone</string>
     <string name="pick_address">Pick an Address</string>
 
+    <string name="activity_share_content">Content/Provider/Share Content</string>
+    <string name="share_content_msg">Share private data of the app by granting access
+        to a specific URI in its content provider.</string>
+    <string name="share_image">Share Image</string>
+
     <string name="activity_changed_contact">Content/Provider/Changed Contacts</string>
 
+    <string name="activity_media_content_observer">Content/Provider/Media Content Observer</string>
+
     <string name="activity_install_apk">Content/Packages/Install Apk</string>
+    <string name="activity_install_apk_session_api">Content/Packages/Install Apk using Session API</string>
 
     <string name="ir_send">Send IR</string>
     <string name="ir_get_freqs">Get Carrier Frequencies</string>
@@ -619,78 +699,6 @@
     <string name="dive">Dive</string>
 
     <!-- ============================== -->
-    <!--  app/menu examples strings     -->
-    <!-- ============================== -->
-
-    <string name="preferences_from_xml">Preference/1. Preferences from XML</string>
-    <string name="launching_preferences">Preference/2. Launching preferences</string>
-    <string name="preference_dependencies">Preference/3. Preference dependencies</string>
-    <string name="default_values">Preference/4. Default values</string>
-    <string name="preferences_from_code">Preference/5. Preferences from code</string>
-    <string name="advanced_preferences">Preference/6. Advanced preferences</string>
-    <string name="fragment_preferences">Preference/7. Fragment</string>
-    <string name="preference_with_headers">Preference/8. Headers</string>
-    <string name="switch_preference">Preference/9. Switch</string>
-
-    <string name="launch_preference_activity">Launch PreferenceActivity</string>
-    <string name="counter_value_is">The counter value is</string>
-
-    <string name="inline_preferences">In-line preferences</string>
-    <string name="dialog_based_preferences">Dialog-based preferences</string>
-    <string name="launch_preferences">Launch preferences</string>
-    <string name="preference_attributes">Preference attributes</string>
-
-    <string name="title_checkbox_preference">Checkbox preference</string>
-    <string name="summary_checkbox_preference">This is a checkbox</string>
-
-    <string name="title_switch_preference">Switch preference</string>
-    <string name="summary_switch_preference">This is a switch</string>
-    <string name="summary_switch_preference_yes_no">This is a switch with custom text</string>
-
-    <string name="title_yesno_preference">Yes or no preference</string>
-    <string name="summary_yesno_preference">An example that uses a yes/no dialog</string>
-    <string name="dialog_title_yesno_preference">Do you like bananas?</string>
-
-    <string name="title_edittext_preference">Edit text preference</string>
-    <string name="summary_edittext_preference">An example that uses an edit text dialog</string>
-    <string name="dialog_title_edittext_preference">Enter your favorite animal</string>
-
-    <string name="title_list_preference">List preference</string>
-    <string name="summary_list_preference">An example that uses a list dialog</string>
-    <string name="dialog_title_list_preference">Choose one</string>
-
-    <string name="title_screen_preference">Screen preference</string>
-    <string name="summary_screen_preference">Shows another screen of preferences</string>
-
-    <string name="title_fragment_preference">Fragment preference</string>
-    <string name="summary_fragment_preference">Shows another fragment of preferences</string>
-
-    <string name="title_next_screen_toggle_preference">Toggle preference</string>
-    <string name="summary_next_screen_toggle_preference">Preference that is on the next screen but same hierarchy</string>
-
-    <string name="title_intent_preference">Intent preference</string>
-    <string name="summary_intent_preference">Launches an Activity from an Intent</string>
-
-    <string name="title_my_preference">My preference</string>
-    <string name="summary_my_preference">This is a custom counter preference</string>
-
-    <string name="title_advanced_toggle_preference">Haunted preference</string>
-    <string name="summary_on_advanced_toggle_preference">I\'m on! :)</string>
-    <string name="summary_off_advanced_toggle_preference">I\'m off! :(</string>
-
-    <string name="title_parent_preference">Parent checkbox preference</string>
-    <string name="summary_parent_preference">This is visually a parent</string>
-    <string name="title_child_preference">Child checkbox preference</string>
-    <string name="summary_child_preference">This is visually a child</string>
-
-    <string name="example_preference_dependency">Example preference dependency</string>
-    <string name="title_wifi">WiFi</string>
-    <string name="title_wifi_settings">WiFi settings</string>
-
-    <string name="default_value_list_preference">beta</string>
-    <string name="default_value_edittext_preference">Default value</string>
-
-    <!-- ============================== -->
     <!--  app/search examples strings  -->
     <!-- ============================== -->
 
@@ -734,6 +742,9 @@
         for you to directly control what the DeviceAdmin does with the
         system.</string>
 
+    <string name="sample_device_admin2">Dummy Device Admin</string>
+    <string name="sample_device_admin_description2">Dummy device admin</string>
+
     <!-- Strings used in preference headers and preference definitions -->
     <string name="header_general">General</string>
     <string name="header_quality">Password quality</string>
@@ -749,6 +760,8 @@
     <string name="disable_keyguard_notifications">Disable keyguard notifications</string>
     <string name="disable_keyguard_unredacted_notifications">Disable keyguard unredacted notifications</string>
     <string name="disable_keyguard_trust_agents">Disable keyguard Trust Agents</string>
+    <string name="disable_keyguard_fingerprint">Disable keyguard Fingerprint</string>
+    <string name="disable_keyguard_remote_input">Disable keyguard Remote Input</string>
     <string name="keyguard_widgets_disabled">Keyguard widgets disabled</string>
     <string name="keyguard_widgets_enabled">Keyguard widgets enabled</string>
     <string name="keyguard_secure_camera_disabled">Keyguard secure camera disabled</string>
@@ -759,6 +772,10 @@
     <string name="keyguard_unredacted_notifications_enabled">Keyguard unredacted notifications enabled</string>
     <string name="keyguard_trust_agents_disabled">Keyguard Trust Agents disabled</string>
     <string name="keyguard_trust_agents_enabled">Keyguard Trust Agents enabled</string>
+    <string name="keyguard_fingerprint_disabled">Keyguard Fingerprint disabled</string>
+    <string name="keyguard_fingerprint_enabled">Keyguard Fingerprint enabled</string>
+    <string name="keyguard_remote_input_disabled">Keyguard Remote Input disabled</string>
+    <string name="keyguard_remote_input_enabled">Keyguard Remote Input enabled</string>
     <string name="camera_disabled">Device cameras disabled</string>
     <string name="camera_enabled">Device cameras enabled</string>
     <string name="password_controls_category">Password controls</string>
@@ -789,6 +806,10 @@
     <string name="encryption_category">Encryption</string>
     <string name="require_encryption">Require encryption</string>
     <string name="activate_encryption">Activate encryption</string>
+
+    <string name="trust_agent_category">Trust Agent Features</string>
+    <string name="set_trust_agent_component_name">Enabled Component Name</string>
+    <string name="set_trust_agent_feature_list">Enabled Features (comma-separated)</string>
 
     <!-- Strings used by DeviceAdminSample controller code -->
     <string name="password_sufficient">Current password meets policy requirements</string>
@@ -970,6 +991,8 @@
     <string name="seekbar_tracking_off">Tracking off</string>
     <string name="seekbar_from_touch">from touch</string>
 
+    <string name="enabled">Enabled</string>
+
     <string name="ratingbar_rating">Rating:</string>
 
     <string name="popup_menu_search">Search</string>
@@ -1065,6 +1088,52 @@
     <string name="hover_intercept_message_initial">Try hovering over the button.</string>
     <string name="hover_intercept_message_intercepted">Intercepted hover event instead of sending it to the button.  Om nom nom!</string>
     <string name="hover_button">Hover Here</string>
+    <string name="pointer_type_description">The following demo is meaningful only with mouse. This does not have any effects on the touch screens.</string>
+    <string name="pointer_type_arrow">arrow</string>
+    <string name="pointer_type_context_menu">context menu</string>
+    <string name="pointer_type_hand">hand</string>
+    <string name="pointer_type_help">help</string>
+    <string name="pointer_type_wait">wait</string>
+    <string name="pointer_type_cell">cell</string>
+    <string name="pointer_type_crosshair">crosshair</string>
+    <string name="pointer_type_text">text (I-beam)</string>
+    <string name="pointer_type_vertical_text">vertical text</string>
+    <string name="pointer_type_alias">alias</string>
+    <string name="pointer_type_copy">copy</string>
+    <string name="pointer_type_no_drop">no drop</string>
+    <string name="pointer_type_all_scroll">all scroll</string>
+    <string name="pointer_type_horizontal_double_arrow">horizontal double arrow</string>
+    <string name="pointer_type_vertical_double_arrow">vertical double arrow</string>
+    <string name="pointer_type_top_right_diagonal_double_arrow">top right diagonal double arrow</string>
+    <string name="pointer_type_top_left_diagonal_double_arrow">top left diagonal double arrow</string>
+    <string name="pointer_type_zoom_in">zoom in</string>
+    <string name="pointer_type_zoom_out">zoom out</string>
+    <string name="pointer_type_grab">grab</string>
+    <string name="pointer_type_grabbing">grabbing</string>
+    <string name="pointer_type_none">none (invisible)</string>
+    <string name="pointer_type_custom_resource">Custom (defined in resource file)</string>
+    <string name="pointer_type_custom_resource_code">Custom (resource loaded in code)</string>
+    <string name="pointer_type_custom_static">Custom (static bitmap created in code)</string>
+    <string name="pointer_type_custom_system">Custom (system icon picked in code)</string>
+    <string name="pointer_type_custom_live">Custom (dynamic image created in code)</string>
+
+    <string name="tooltips_container_tooltip">Parent view may have its own tooltip</string>
+    <string name="tooltips_description">Long press or hover on widgets to see tooltips</string>
+    <string name="tooltips_code_label">Set in code</string>
+    <string name="tooltips_resource_label">Set in resource</string>
+    <string name="tooltips_resource_tooltip">This tooltip is set in resource</string>
+    <string name="tooltips_long_label">Long tooltip</string>
+    <string name="tooltips_long_tooltip">An overly long tooltip will be truncated (3 lines max). An overly long tooltip will be truncated (3 lines max). An overly long tooltip will be truncated (3 lines max). An overly long tooltip will be truncated (3 lines max)</string>
+    <string name="tooltips_edge_label">Near the edge</string>
+    <string name="tooltips_edge_tooltip">A tooltip always fits inside the app window</string>
+    <string name="tooltips_above_label">Above placement</string>
+    <string name="tooltips_above_tooltip">When there is not enough room below, the tooltip goes above</string>
+    <string name="tooltips_wide_label">Wide widget</string>
+    <string name="tooltips_wide_tooltip">Wide widget gets a tooltip horizontally aligned to the pointer position</string>
+    <string name="tooltips_tall_label">Tall\nwidget</string>
+    <string name="tooltips_tall_tooltip">Tall widget gets a tooltip vertically aligned to the pointer position</string>
+    <string name="tooltips_large_label">Large widget</string>
+    <string name="tooltips_large_tooltip">Tall and wide widget gets a tooltip aligned to the pointer position</string>
 
     <!-- ============================== -->
     <!--  GoogleLogin examples strings  -->
@@ -1135,6 +1204,21 @@
     <string name="controls_1_radiobutton_1">RadioButton 1</string>
     <string name="controls_1_radiobutton_2">RadioButton 2</string>
     <string name="controls_1_star">Star</string>
+    <string name="controls_header_buttons">Buttons</string>
+    <string name="controls_button">Button</string>
+    <string name="controls_button_borderless">Button.Borderless</string>
+    <string name="controls_button_colored">Button.Colored</string>
+    <string name="controls_button_borderless_colored">Button.Borderless.Colored</string>
+    <string name="controls_header_compound_buttons">Compound buttons</string>
+    <string name="controls_header_spinners">Spinners</string>
+    <string name="controls_spinner">Spinner</string>
+    <string name="controls_spinner_underlined">Spinner.Underlined</string>
+    <string name="controls_switch">Switch</string>
+    <string name="controls_header_seek_bars">Seek bars</string>
+    <string name="controls_seek_bar">SeekBar</string>
+    <string name="controls_seek_bar_discrete">SeekBar.Discrete</string>
+    <string name="controls_header_text_fields">Text fields</string>
+    <string name="controls_header_text_appearances">Text appearances</string>
     <string name="focus_1_message">Service not running</string>
     <string name="focus_1_placeholder">placeholder</string>
     <string name="focus_2_left">left</string>
@@ -1236,6 +1320,7 @@
     <string name="rotation_animation_rotate">ROTATE</string>
     <string name="rotation_animation_crossfade">XFADE</string>
     <string name="rotation_animation_jumpcut">JUMPCUT</string>
+    <string name="rotation_animation_seamless">SEAMLESS</string>
     <string name="scroll_view_1_text_1">Text View 1</string>
     <string name="scroll_view_1_button_1">Button 1</string>
     <string name="scroll_view_1_text_2">Text View 2</string>
@@ -1512,6 +1597,9 @@
     <string name="accessibility_custom_on">On</string>
     <string name="accessibility_custom_off">Off</string>
 
+    <string name="magnification_service_label">Magnification</string>
+    <string name="magnification_service_description">Allows the volume keys to control display magnification</string>
+
     <string name="task_name">Task</string>
     <string name="task_complete_template">Task %1$s %2$s</string>
     <string name="task_complete">is complete</string>
@@ -1552,4 +1640,13 @@
     <string name="mms_status_downloading">Downloading</string>
 
     <string name="mms_enable_receiver">Enable MMS broadcast receiver</string>
+
+    <string name="process_text_title">Content/Process Text Intent</string>
+    <string name="process_text_received_text_title">Received text selection</string>
+    <string name="process_text_finish_readonly">Finish</string>
+    <string name="process_text_finish">Replace</string>
+    <string name="process_text_no_text_received">No text received.</string>
+    <string name="process_text_no_text_process_intent_received">Try selecting some text in another app and find this app\'s name in the list of options for its selection menu.</string>
+    <string name="process_text_send_title">Select text to process</string>
+    <string name="process_text_send_description">Select a piece of text from this box to trigger the text selection action mode. In there, you will find \"ApiDemos\". That is because this app declares it can handle text processing intents. Try selecting that action to send the selected text to that activity and retrieve processed text back.</string>
 </resources>

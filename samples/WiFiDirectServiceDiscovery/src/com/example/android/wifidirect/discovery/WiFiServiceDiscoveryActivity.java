@@ -1,12 +1,15 @@
 
 package com.example.android.wifidirect.discovery;
 
+import android.Manifest;
 import android.app.Activity;
 import android.app.Fragment;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.net.wifi.WpsInfo;
+import android.net.wifi.WifiManager;
 import android.net.wifi.p2p.WifiP2pConfig;
 import android.net.wifi.p2p.WifiP2pDevice;
 import android.net.wifi.p2p.WifiP2pInfo;
@@ -18,6 +21,7 @@ import android.net.wifi.p2p.WifiP2pManager.DnsSdServiceResponseListener;
 import android.net.wifi.p2p.WifiP2pManager.DnsSdTxtRecordListener;
 import android.net.wifi.p2p.nsd.WifiP2pDnsSdServiceInfo;
 import android.net.wifi.p2p.nsd.WifiP2pDnsSdServiceRequest;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
@@ -57,6 +61,9 @@ public class WiFiServiceDiscoveryActivity extends Activity implements
 
     public static final int MESSAGE_READ = 0x400 + 1;
     public static final int MY_HANDLE = 0x400 + 2;
+
+    private static final int PERMISSIONS_REQUEST_CODE = 1001;
+
     private WifiP2pManager manager;
 
     static final int SERVER_PORT = 4545;
@@ -80,6 +87,55 @@ public class WiFiServiceDiscoveryActivity extends Activity implements
         this.handler = handler;
     }
 
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions,
+            int[] grantResults) {
+        switch (requestCode) {
+        case PERMISSIONS_REQUEST_CODE:
+            if  (grantResults[0] != PackageManager.PERMISSION_GRANTED) {
+                Log.e(TAG, "Fine location permission is not granted!");
+                finish();
+            } else {
+                startRegistrationAndDiscovery();
+            }
+            break;
+        }
+    }
+
+    private boolean initP2p() {
+        // Device capability definition check
+        if (!getPackageManager().hasSystemFeature(PackageManager.FEATURE_WIFI_DIRECT)) {
+            Log.e(TAG, "Wi-Fi Direct is not supported by this device.");
+            return false;
+        }
+
+        // Hardware capability check
+        WifiManager wifiManager = (WifiManager) getSystemService(Context.WIFI_SERVICE);
+        if (wifiManager == null) {
+            Log.e(TAG, "Cannot get Wi-Fi system service.");
+            return false;
+        }
+
+        if (!wifiManager.isP2pSupported()) {
+            Log.e(TAG, "Wi-Fi Direct is not supported by the hardware or Wi-Fi is off.");
+            return false;
+        }
+
+        manager = (WifiP2pManager) getSystemService(Context.WIFI_P2P_SERVICE);
+        if (manager == null) {
+            Log.e(TAG, "Cannot get Wi-Fi Direct system service.");
+            return false;
+        }
+
+        channel = manager.initialize(this, getMainLooper(), null);
+        if (channel == null) {
+            Log.e(TAG, "Cannot initialize Wi-Fi Direct.");
+            return false;
+        }
+
+        return true;
+    }
+
     /** Called when the activity is first created. */
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -94,13 +150,24 @@ public class WiFiServiceDiscoveryActivity extends Activity implements
         intentFilter
                 .addAction(WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION);
 
-        manager = (WifiP2pManager) getSystemService(Context.WIFI_P2P_SERVICE);
-        channel = manager.initialize(this, getMainLooper(), null);
-        startRegistrationAndDiscovery();
+        if (!initP2p()) {
+            finish();
+        }
 
         servicesList = new WiFiDirectServicesList();
         getFragmentManager().beginTransaction()
                 .add(R.id.container_root, servicesList, "services").commit();
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                    && checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                    != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION},
+                    PERMISSIONS_REQUEST_CODE);
+            // After this point you wait for callback in
+            // onRequestPermissionsResult(int, String[], int[]) overridden method
+        } else {
+            startRegistrationAndDiscovery();
+        }
 
     }
 

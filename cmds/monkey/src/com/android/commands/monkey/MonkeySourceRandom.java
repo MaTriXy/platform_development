@@ -27,6 +27,7 @@ import android.view.MotionEvent;
 import android.view.Surface;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Random;
 
 /**
@@ -77,13 +78,14 @@ public class MonkeySourceRandom implements MonkeyEventSource {
     public static final int FACTOR_PINCHZOOM    = 2;
     public static final int FACTOR_TRACKBALL    = 3;
     public static final int FACTOR_ROTATION     = 4;
-    public static final int FACTOR_NAV          = 5;
-    public static final int FACTOR_MAJORNAV     = 6;
-    public static final int FACTOR_SYSOPS       = 7;
-    public static final int FACTOR_APPSWITCH    = 8;
-    public static final int FACTOR_FLIP         = 9;
-    public static final int FACTOR_ANYTHING     = 10;
-    public static final int FACTORZ_COUNT       = 11;    // should be last+1
+    public static final int FACTOR_PERMISSION   = 5;
+    public static final int FACTOR_NAV          = 6;
+    public static final int FACTOR_MAJORNAV     = 7;
+    public static final int FACTOR_SYSOPS       = 8;
+    public static final int FACTOR_APPSWITCH    = 9;
+    public static final int FACTOR_FLIP         = 10;
+    public static final int FACTOR_ANYTHING     = 11;
+    public static final int FACTORZ_COUNT       = 12;    // should be last+1
 
     private static final int GESTURE_TAP = 0;
     private static final int GESTURE_DRAG = 1;
@@ -93,12 +95,13 @@ public class MonkeySourceRandom implements MonkeyEventSource {
      * values after we read any optional values.
      **/
     private float[] mFactors = new float[FACTORZ_COUNT];
-    private ArrayList<ComponentName> mMainApps;
+    private HashMap<ComponentName, String> mMainApps;
     private int mEventCount = 0;  //total number of events generated so far
     private MonkeyEventQueue mQ;
     private Random mRandom;
     private int mVerbose = 0;
     private long mThrottle = 0;
+    private MonkeyPermissionUtil mPermissionUtil;
 
     private boolean mKeyboardOpen = false;
 
@@ -117,8 +120,8 @@ public class MonkeySourceRandom implements MonkeyEventSource {
         return KeyEvent.keyCodeFromString(keyName);
     }
 
-    public MonkeySourceRandom(Random random, ArrayList<ComponentName> MainApps,
-            long throttle, boolean randomizeThrottle) {
+    public MonkeySourceRandom(Random random, HashMap<ComponentName, String> MainApps,
+            long throttle, boolean randomizeThrottle, boolean permissionTargetSystem) {
         // default values for random distributions
         // note, these are straight percentages, to match user input (cmd line args)
         // but they will be converted to 0..1 values before the main loop runs.
@@ -132,12 +135,16 @@ public class MonkeySourceRandom implements MonkeyEventSource {
         mFactors[FACTOR_SYSOPS] = 2.0f;
         mFactors[FACTOR_APPSWITCH] = 2.0f;
         mFactors[FACTOR_FLIP] = 1.0f;
+        // disbale permission by default
+        mFactors[FACTOR_PERMISSION] = 0.0f;
         mFactors[FACTOR_ANYTHING] = 13.0f;
         mFactors[FACTOR_PINCHZOOM] = 2.0f;
 
         mRandom = random;
         mMainApps = MainApps;
         mQ = new MonkeyEventQueue(random, throttle, randomizeThrottle);
+        mPermissionUtil = new MonkeyPermissionUtil();
+        mPermissionUtil.setTargetSystemPackages(permissionTargetSystem);
     }
 
     /**
@@ -159,13 +166,13 @@ public class MonkeySourceRandom implements MonkeyEventSource {
 
         // if the user request was > 100%, reject it
         if (userSum > 100.0f) {
-            System.err.println("** Event weights > 100%");
+            Logger.err.println("** Event weights > 100%");
             return false;
         }
 
         // if the user specified all of the weights, then they need to be 100%
         if (defaultCount == 0 && (userSum < 99.9f || userSum > 100.1f)) {
-            System.err.println("** Event weights != 100%");
+            Logger.err.println("** Event weights != 100%");
             return false;
         }
 
@@ -184,9 +191,9 @@ public class MonkeySourceRandom implements MonkeyEventSource {
 
         // if verbose, show factors
         if (mVerbose > 0) {
-            System.out.println("// Event percentages:");
+            Logger.out.println("// Event percentages:");
             for (int i = 0; i < FACTORZ_COUNT; ++i) {
-                System.out.println("//   " + i + ": " + mFactors[i] + "%");
+                Logger.out.println("//   " + i + ": " + mFactors[i] + "%");
             }
         }
 
@@ -212,7 +219,7 @@ public class MonkeySourceRandom implements MonkeyEventSource {
                 return true;
             }
         }
-        System.err.println("** " + catName + " has no physical keys but with factor " + factor + "%.");
+        Logger.err.println("** " + catName + " has no physical keys but with factor " + factor + "%.");
         return false;
     }
 
@@ -410,6 +417,9 @@ public class MonkeySourceRandom implements MonkeyEventSource {
         } else if (cls < mFactors[FACTOR_ROTATION]) {
             generateRotationEvent(mRandom);
             return;
+        } else if (cls < mFactors[FACTOR_PERMISSION]) {
+            mQ.add(mPermissionUtil.generateRandomPermissionEvent(mRandom));
+            return;
         }
 
         // The remaining event categories are injected as key events
@@ -421,8 +431,8 @@ public class MonkeySourceRandom implements MonkeyEventSource {
             } else if (cls < mFactors[FACTOR_SYSOPS]) {
                 lastKey = SYS_KEYS[mRandom.nextInt(SYS_KEYS.length)];
             } else if (cls < mFactors[FACTOR_APPSWITCH]) {
-                MonkeyActivityEvent e = new MonkeyActivityEvent(mMainApps.get(
-                        mRandom.nextInt(mMainApps.size())));
+                MonkeyActivityEvent e = new MonkeyActivityEvent(new ArrayList<ComponentName>(mMainApps.keySet()).get(
+                        mRandom.nextInt(mMainApps.size())), mMainApps);
                 mQ.addLast(e);
                 return;
             } else if (cls < mFactors[FACTOR_FLIP]) {
@@ -437,6 +447,7 @@ public class MonkeySourceRandom implements MonkeyEventSource {
             if (lastKey != KeyEvent.KEYCODE_POWER
                     && lastKey != KeyEvent.KEYCODE_ENDCALL
                     && lastKey != KeyEvent.KEYCODE_SLEEP
+                    && lastKey != KeyEvent.KEYCODE_SOFT_SLEEP
                     && PHYSICAL_KEY_EXISTS[lastKey]) {
                 break;
             }
@@ -450,8 +461,15 @@ public class MonkeySourceRandom implements MonkeyEventSource {
     }
 
     public boolean validate() {
-        //check factors
-        return adjustEventFactors();
+        boolean ret = true;
+        // only populate & dump permissions if enabled
+        if (mFactors[FACTOR_PERMISSION] != 0.0f) {
+            ret &= mPermissionUtil.populatePermissionsMapping();
+            if (ret && mVerbose >= 2) {
+                mPermissionUtil.dump();
+            }
+        }
+        return ret & adjustEventFactors();
     }
 
     public void setVerbose(int verbose) {
@@ -462,8 +480,8 @@ public class MonkeySourceRandom implements MonkeyEventSource {
      * generate an activity event
      */
     public void generateActivity() {
-        MonkeyActivityEvent e = new MonkeyActivityEvent(mMainApps.get(
-                mRandom.nextInt(mMainApps.size())));
+        MonkeyActivityEvent e = new MonkeyActivityEvent(new ArrayList<ComponentName>(mMainApps.keySet()).get(
+            mRandom.nextInt(mMainApps.size())), mMainApps);
         mQ.addLast(e);
     }
 

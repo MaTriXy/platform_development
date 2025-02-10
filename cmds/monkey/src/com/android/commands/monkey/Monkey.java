@@ -16,30 +16,34 @@
 
 package com.android.commands.monkey;
 
-import android.app.ActivityManagerNative;
+import static android.view.InputDevice.SOURCE_TOUCHSCREEN;
+import static android.view.MotionEvent.TOOL_TYPE_FINGER;
+
+import android.app.ActivityManager;
 import android.app.IActivityController;
 import android.app.IActivityManager;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.IPackageManager;
 import android.content.pm.ResolveInfo;
+import android.hardware.display.DisplayManagerGlobal;
+import android.hardware.input.VirtualTouchEvent;
 import android.os.Build;
 import android.os.Debug;
 import android.os.Environment;
+import android.os.IBinder;
 import android.os.Process;
 import android.os.RemoteException;
 import android.os.ServiceManager;
 import android.os.StrictMode;
 import android.os.SystemClock;
-import android.os.SystemProperties;
-import android.os.UserHandle;
+import android.view.Display;
 import android.view.IWindowManager;
+import android.view.MotionEvent;
 import android.view.Surface;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
-import java.io.ByteArrayInputStream;
-import java.io.DataInputStream;
 import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
@@ -47,17 +51,27 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Writer;
-import java.security.SecureRandom;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
+import java.util.Set;
 
 /**
  * Application that injects random key events and other actions into the system.
  */
 public class Monkey {
+    static {
+        System.loadLibrary("monkey_jni");
+    }
+
+    private static native IBinder createNativeService(int width, int height);
 
     /**
      * Monkey Debugging/Dev Support
@@ -175,28 +189,30 @@ public class Monkey {
     /** Generate hprof reports before/after monkey runs */
     private boolean mGenerateHprof;
 
-    /** Package blacklist file. */
+    /** If set, only match error if this text appears in the description text. */
+    private String mMatchDescription;
+
+    /** Package denylist file. */
     private String mPkgBlacklistFile;
 
-    /** Package whitelist file. */
+    /** Package allowlist file. */
     private String mPkgWhitelistFile;
-
-    /** Packages we are allowed to run, or empty if no restriction. */
-    private HashSet<String> mValidPackages = new HashSet<String>();
-
-    /** Packages we are not allowed to run. */
-    private HashSet<String> mInvalidPackages = new HashSet<String>();
 
     /** Categories we are allowed to launch **/
     private ArrayList<String> mMainCategories = new ArrayList<String>();
 
-    /** Applications we can switch to. */
-    private ArrayList<ComponentName> mMainApps = new ArrayList<ComponentName>();
+    /**
+     * Applications we can switch to, as well as their corresponding categories.
+     */
+    private HashMap<ComponentName, String> mMainApps = new HashMap<>();
 
     /** The delay between event inputs **/
     long mThrottle = 0;
 
-    /** Whether to randomize each throttle (0-mThrottle ms) inserted between events. */
+    /**
+     * Whether to randomize each throttle (0-mThrottle ms) inserted between
+     * events.
+     */
     boolean mRandomizeThrottle = false;
 
     /** The number of iterations **/
@@ -207,6 +223,8 @@ public class Monkey {
 
     /** The random number generator **/
     Random mRandom = null;
+
+    private final IMonkey mMonkeyService = createMonkeyService();
 
     /** Dropped-event statistics **/
     long mDroppedKeyEvents = 0;
@@ -243,7 +261,11 @@ public class Monkey {
 
     private static final File TOMBSTONES_PATH = new File("/data/tombstones");
 
-    private HashSet<String> mTombstones = null;
+    private static final String TOMBSTONE_PREFIX = "tombstone_";
+
+    private static int NUM_READ_TOMBSTONE_RETRIES = 5;
+
+    private HashSet<Long> mTombstones = null;
 
     float[] mFactors = new float[MonkeySourceRandom.FACTORZ_COUNT];
 
@@ -251,28 +273,20 @@ public class Monkey {
 
     private MonkeyNetworkMonitor mNetworkMonitor = new MonkeyNetworkMonitor();
 
+    private boolean mPermissionTargetSystem = false;
+
     // information on the current activity.
     public static Intent currentIntent;
 
     public static String currentPackage;
 
-    /**
-     * Check whether we should run against the givn package.
-     *
-     * @param pkg The package name.
-     * @return Returns true if we should run against pkg.
-     */
-    private boolean checkEnteringPackage(String pkg) {
-        if (mInvalidPackages.size() > 0) {
-            if (mInvalidPackages.contains(pkg)) {
-                return false;
-            }
-        } else if (mValidPackages.size() > 0) {
-            if (!mValidPackages.contains(pkg)) {
-                return false;
-            }
-        }
-        return true;
+    private static IMonkey createMonkeyService() {
+        // Get the width and height of the touchscreen on the default display
+        Display display = DisplayManagerGlobal.getInstance().getRealDisplay(
+                Display.DEFAULT_DISPLAY);
+        final int width = display.getWidth();
+        final int height = display.getHeight();
+        return IMonkey.Stub.asInterface(createNativeService(width, height));
     }
 
     /**
@@ -280,7 +294,7 @@ public class Monkey {
      */
     private class ActivityController extends IActivityController.Stub {
         public boolean activityStarting(Intent intent, String pkg) {
-            boolean allow = checkEnteringPackage(pkg) || (DEBUG_ALLOW_ANY_STARTS != 0);
+            final boolean allow = isActivityStartingAllowed(intent, pkg);
             if (mVerbose > 0) {
                 // StrictMode's disk checks end up catching this on
                 // userdebug/eng builds due to PrintStream going to a
@@ -289,8 +303,8 @@ public class Monkey {
                 // around this region for the monkey to minimize
                 // harmless dropbox uploads from monkeys.
                 StrictMode.ThreadPolicy savedPolicy = StrictMode.allowThreadDiskWrites();
-                System.out.println("    // " + (allow ? "Allowing" : "Rejecting") + " start of "
-                        + intent + " in package " + pkg);
+                Logger.out.println("    // " + (allow ? "Allowing" : "Rejecting")
+                        + " start of " + intent + " in package " + pkg);
                 StrictMode.setThreadPolicy(savedPolicy);
             }
             currentPackage = pkg;
@@ -298,13 +312,42 @@ public class Monkey {
             return allow;
         }
 
+        private boolean isActivityStartingAllowed(Intent intent, String pkg) {
+            if (MonkeyUtils.getPackageFilter().checkEnteringPackage(pkg)) {
+                return true;
+            }
+            if (DEBUG_ALLOW_ANY_STARTS != 0) {
+                return true;
+            }
+            // In case the activity is launching home and the default launcher
+            // package is disabled, allow anyway to prevent ANR (see b/38121026)
+            final Set<String> categories = intent.getCategories();
+            if (intent.getAction() == Intent.ACTION_MAIN && categories != null
+                    && categories.contains(Intent.CATEGORY_HOME)) {
+                try {
+                    final ResolveInfo resolveInfo = mPm.resolveIntent(
+                            intent, intent.getType(), 0, ActivityManager.getCurrentUser());
+                    final String launcherPackage = resolveInfo.activityInfo.packageName;
+                    if (pkg.equals(launcherPackage)) {
+                        return true;
+                    }
+                } catch (RemoteException e) {
+                    Logger.err.println("** Failed talking with package manager!");
+                    return false;
+                }
+            }
+            return false;
+        }
+
         public boolean activityResuming(String pkg) {
             StrictMode.ThreadPolicy savedPolicy = StrictMode.allowThreadDiskWrites();
-            System.out.println("    // activityResuming(" + pkg + ")");
-            boolean allow = checkEnteringPackage(pkg) || (DEBUG_ALLOW_ANY_RESTARTS != 0);
+            Logger.out.println("    // activityResuming(" + pkg + ")");
+            boolean allow =
+                    MonkeyUtils.getPackageFilter().checkEnteringPackage(pkg)
+                            || (DEBUG_ALLOW_ANY_RESTARTS != 0);
             if (!allow) {
                 if (mVerbose > 0) {
-                    System.out.println("    // " + (allow ? "Allowing" : "Rejecting")
+                    Logger.out.println("    // " + (allow ? "Allowing" : "Rejecting")
                             + " resume of package " + pkg);
                 }
             }
@@ -313,30 +356,35 @@ public class Monkey {
             return allow;
         }
 
-        public boolean appCrashed(String processName, int pid,
-                String shortMsg, String longMsg,
-                long timeMillis, String stackTrace) {
+        public boolean appCrashed(String processName, int pid, String shortMsg,
+                                String longMsg, long timeMillis,
+                                String stackTrace) {
             StrictMode.ThreadPolicy savedPolicy = StrictMode.allowThreadDiskWrites();
-            System.err.println("// CRASH: " + processName + " (pid " + pid + ")");
-            System.err.println("// Short Msg: " + shortMsg);
-            System.err.println("// Long Msg: " + longMsg);
-            System.err.println("// Build Label: " + Build.FINGERPRINT);
-            System.err.println("// Build Changelist: " + Build.VERSION.INCREMENTAL);
-            System.err.println("// Build Time: " + Build.TIME);
-            System.err.println("// " + stackTrace.replace("\n", "\n// "));
+            Logger.err.println("// CRASH: " + processName + " (pid " + pid + ")");
+            Logger.err.println("// Short Msg: " + shortMsg);
+            Logger.err.println("// Long Msg: " + longMsg);
+            Logger.err.println("// Build Label: " + Build.FINGERPRINT);
+            Logger.err.println("// Build Changelist: " + Build.VERSION.INCREMENTAL);
+            Logger.err.println("// Build Time: " + Build.TIME);
+            Logger.err.println("// " + stackTrace.replace("\n", "\n// "));
             StrictMode.setThreadPolicy(savedPolicy);
 
-            if (!mIgnoreCrashes || mRequestBugreport) {
-                synchronized (Monkey.this) {
-                    if (!mIgnoreCrashes) {
-                        mAbort = true;
+            if (mMatchDescription == null
+                    || shortMsg.contains(mMatchDescription)
+                    || longMsg.contains(mMatchDescription)
+                    || stackTrace.contains(mMatchDescription)) {
+                if (!mIgnoreCrashes || mRequestBugreport) {
+                    synchronized (Monkey.this) {
+                        if (!mIgnoreCrashes) {
+                            mAbort = true;
+                        }
+                        if (mRequestBugreport) {
+                            mRequestAppCrashBugreport = true;
+                            mReportProcessName = processName;
+                        }
                     }
-                    if (mRequestBugreport){
-                        mRequestAppCrashBugreport = true;
-                        mReportProcessName = processName;
-                    }
+                    return !mKillProcessAfterError;
                 }
-                return !mKillProcessAfterError;
             }
             return false;
         }
@@ -345,40 +393,46 @@ public class Monkey {
             return 0;
         }
 
-        public int appNotResponding(String processName, int pid, String processStats) {
+        public int appNotResponding(String processName, int pid,
+                                    String processStats) {
             StrictMode.ThreadPolicy savedPolicy = StrictMode.allowThreadDiskWrites();
-            System.err.println("// NOT RESPONDING: " + processName + " (pid " + pid + ")");
-            System.err.println(processStats);
+            Logger.err.println("// NOT RESPONDING: " + processName + " (pid " + pid + ")");
+            Logger.err.println(processStats);
             StrictMode.setThreadPolicy(savedPolicy);
 
-            synchronized (Monkey.this) {
-                mRequestAnrTraces = true;
-                mRequestDumpsysMemInfo = true;
-                mRequestProcRank = true;
-                if (mRequestBugreport){
-                  mRequestAnrBugreport = true;
-                  mReportProcessName = processName;
-                }
-            }
-            if (!mIgnoreTimeouts) {
+            if (mMatchDescription == null || processStats.contains(mMatchDescription)) {
                 synchronized (Monkey.this) {
-                    mAbort = true;
+                    mRequestAnrTraces = true;
+                    mRequestDumpsysMemInfo = true;
+                    mRequestProcRank = true;
+                    if (mRequestBugreport) {
+                        mRequestAnrBugreport = true;
+                        mReportProcessName = processName;
+                    }
+                }
+                if (!mIgnoreTimeouts) {
+                    synchronized (Monkey.this) {
+                        mAbort = true;
+                    }
                 }
             }
+
             return (mKillProcessAfterError) ? -1 : 1;
         }
 
         public int systemNotResponding(String message) {
             StrictMode.ThreadPolicy savedPolicy = StrictMode.allowThreadDiskWrites();
-            System.err.println("// WATCHDOG: " + message);
+            Logger.err.println("// WATCHDOG: " + message);
             StrictMode.setThreadPolicy(savedPolicy);
 
             synchronized (Monkey.this) {
-                if (!mIgnoreCrashes) {
-                    mAbort = true;
-                }
-                if (mRequestBugreport) {
-                    mRequestWatchdogBugreport = true;
+                if (mMatchDescription == null || message.contains(mMatchDescription)) {
+                    if (!mIgnoreCrashes) {
+                        mAbort = true;
+                    }
+                    if (mRequestBugreport) {
+                        mRequestWatchdogBugreport = true;
+                    }
                 }
                 mWatchdogWaiting = true;
             }
@@ -403,7 +457,7 @@ public class Monkey {
     }
 
     /**
-     * Run "cat /data/anr/traces.txt". Wait about 5 seconds first, to let the
+     * Dump the most recent ANR trace. Wait about 5 seconds first, to let the
      * asynchronous report writing complete.
      */
     private void reportAnrTraces() {
@@ -411,7 +465,25 @@ public class Monkey {
             Thread.sleep(5 * 1000);
         } catch (InterruptedException e) {
         }
-        commandLineReport("anr traces", "cat /data/anr/traces.txt");
+
+        // The /data/anr directory might have multiple files, dump the most
+        // recent of those files.
+        File[] recentTraces = new File("/data/anr/").listFiles();
+        if (recentTraces != null) {
+            File mostRecent = null;
+            long mostRecentMtime = 0;
+            for (File trace : recentTraces) {
+                final long mtime = trace.lastModified();
+                if (mtime > mostRecentMtime) {
+                    mostRecentMtime = mtime;
+                    mostRecent = trace;
+                }
+            }
+
+            if (mostRecent != null) {
+                commandLineReport("anr traces", "cat " + mostRecent.getAbsolutePath());
+            }
+        }
     }
 
     /**
@@ -436,20 +508,16 @@ public class Monkey {
      * @param command Command line to execute.
      */
     private void commandLineReport(String reportName, String command) {
-        System.err.println(reportName + ":");
+        Logger.err.println(reportName + ":");
         Runtime rt = Runtime.getRuntime();
-        Writer logOutput = null;
 
-        try {
+         try (Writer logOutput = mRequestBugreport ?
+            new BufferedWriter(new FileWriter(new File(Environment
+                    .getLegacyExternalStorageDirectory(), reportName), true)) : null) {
             // Process must be fully qualified here because android.os.Process
             // is used elsewhere
             java.lang.Process p = Runtime.getRuntime().exec(command);
 
-            if (mRequestBugreport) {
-                logOutput =
-                        new BufferedWriter(new FileWriter(new File(Environment
-                                .getLegacyExternalStorageDirectory(), reportName), true));
-            }
             // pipe everything from process stdout -> System.err
             InputStream inStream = p.getInputStream();
             InputStreamReader inReader = new InputStreamReader(inStream);
@@ -457,22 +525,28 @@ public class Monkey {
             String s;
             while ((s = inBuffer.readLine()) != null) {
                 if (mRequestBugreport) {
-                    logOutput.write(s);
-                    logOutput.write("\n");
+                    try {
+                        // When no space left on the device the write will
+                        // occurs an I/O exception, so we needed to catch it
+                        // and continue to read the data of the sync pipe to
+                        // aviod the bugreport hang forever.
+                        logOutput.write(s);
+                        logOutput.write("\n");
+                    } catch (IOException e) {
+                        while(inBuffer.readLine() != null) {}
+                        Logger.err.println(e.toString());
+                        break;
+                    }
                 } else {
-                    System.err.println(s);
+                    Logger.err.println(s);
                 }
             }
 
             int status = p.waitFor();
-            System.err.println("// " + reportName + " status was " + status);
-
-            if (logOutput != null) {
-                logOutput.close();
-            }
+            Logger.err.println("// " + reportName + " status was " + status);
         } catch (Exception e) {
-            System.err.println("// Exception from " + reportName + ":");
-            System.err.println(e.toString());
+            Logger.err.println("// Exception from " + reportName + ":");
+            Logger.err.println(e.toString());
         }
     }
 
@@ -486,7 +560,7 @@ public class Monkey {
                     + MonkeyUtils.toCalendarTime(System.currentTimeMillis()) + "\n");
             output.close();
         } catch (IOException e) {
-            System.err.println(e.toString());
+            Logger.err.println(e.toString());
         }
     }
 
@@ -495,6 +569,16 @@ public class Monkey {
         reportName += MonkeyUtils.toCalendarTime(System.currentTimeMillis());
         String bugreportName = reportName.replaceAll("[ ,:]", "_");
         commandLineReport(bugreportName + ".txt", "bugreport");
+    }
+
+    // UncaughtExceptionHandler set by RuntimeInit will report crash to system_server, which
+    // is not necessary for monkey and even causes deadlock. So we override it.
+    private static class KillSelfHandler implements Thread.UncaughtExceptionHandler {
+        @Override
+        public void uncaughtException(Thread t, Throwable e) {
+            Process.killProcess(Process.myPid());
+            System.exit(10);
+        }
     }
 
     /**
@@ -506,6 +590,8 @@ public class Monkey {
         // Set the process name showing in "ps" or "top"
         Process.setArgV0("com.android.commands.monkey");
 
+        Thread.setDefaultUncaughtExceptionHandler(new KillSelfHandler());
+        Logger.err.println("args: " + Arrays.toString(args));
         int resultCode = (new Monkey()).run(args);
         System.exit(resultCode);
     }
@@ -532,6 +618,9 @@ public class Monkey {
 
         // prepare for command-line processing
         mArgs = args;
+        for (String a: args) {
+            Logger.err.println(" arg: \"" + a + "\"");
+        }
         mNextArg = 0;
 
         // set a positive value, indicating none of the factors is provided yet
@@ -558,23 +647,12 @@ public class Monkey {
         }
 
         if (mVerbose > 0) {
-            System.out.println(":Monkey: seed=" + mSeed + " count=" + mCount);
-            if (mValidPackages.size() > 0) {
-                Iterator<String> it = mValidPackages.iterator();
-                while (it.hasNext()) {
-                    System.out.println(":AllowPackage: " + it.next());
-                }
-            }
-            if (mInvalidPackages.size() > 0) {
-                Iterator<String> it = mInvalidPackages.iterator();
-                while (it.hasNext()) {
-                    System.out.println(":DisallowPackage: " + it.next());
-                }
-            }
+            Logger.out.println(":Monkey: seed=" + mSeed + " count=" + mCount);
+            MonkeyUtils.getPackageFilter().dump();
             if (mMainCategories.size() != 0) {
                 Iterator<String> it = mMainCategories.iterator();
                 while (it.hasNext()) {
-                    System.out.println(":IncludeCategory: " + it.next());
+                    Logger.out.println(":IncludeCategory: " + it.next());
                 }
             }
         }
@@ -617,16 +695,17 @@ public class Monkey {
             try {
                 mEventSource = new MonkeySourceNetwork(mServerPort);
             } catch (IOException e) {
-                System.out.println("Error binding to network socket.");
+                Logger.out.println("Error binding to network socket.");
                 return -5;
             }
             mCount = Integer.MAX_VALUE;
         } else {
             // random source by default
             if (mVerbose >= 2) { // check seeding performance
-                System.out.println("// Seeded: " + mSeed);
+                Logger.out.println("// Seeded: " + mSeed);
             }
-            mEventSource = new MonkeySourceRandom(mRandom, mMainApps, mThrottle, mRandomizeThrottle);
+            mEventSource = new MonkeySourceRandom(mRandom, mMainApps,
+                    mThrottle, mRandomizeThrottle, mPermissionTargetSystem);
             mEventSource.setVerbose(mVerbose);
             // set any of the factors that has been set
             for (int i = 0; i < MonkeySourceRandom.FACTORZ_COUNT; i++) {
@@ -668,12 +747,12 @@ public class Monkey {
                 mRequestAnrTraces = false;
             }
             if (mRequestAnrBugreport){
-                System.out.println("Print the anr report");
+                Logger.out.println("Print the anr report");
                 getBugreport("anr_" + mReportProcessName + "_");
                 mRequestAnrBugreport = false;
             }
             if (mRequestWatchdogBugreport) {
-                System.out.println("Print the watchdog report");
+                Logger.out.println("Print the watchdog report");
                 getBugreport("anr_watchdog_");
                 mRequestWatchdogBugreport = false;
             }
@@ -698,12 +777,12 @@ public class Monkey {
         if (mGenerateHprof) {
             signalPersistentProcesses();
             if (mVerbose > 0) {
-                System.out.println("// Generated profiling reports in /data/misc");
+                Logger.out.println("// Generated profiling reports in /data/misc");
             }
         }
 
         try {
-            mAm.setActivityController(null);
+            mAm.setActivityController(null, true);
             mNetworkMonitor.unregister(mAm);
         } catch (RemoteException e) {
             // just in case this was latent (after mCount cycles), make sure
@@ -715,31 +794,100 @@ public class Monkey {
 
         // report dropped event stats
         if (mVerbose > 0) {
-            System.out.print(":Dropped: keys=");
-            System.out.print(mDroppedKeyEvents);
-            System.out.print(" pointers=");
-            System.out.print(mDroppedPointerEvents);
-            System.out.print(" trackballs=");
-            System.out.print(mDroppedTrackballEvents);
-            System.out.print(" flips=");
-            System.out.print(mDroppedFlipEvents);
-            System.out.print(" rotations=");
-            System.out.println(mDroppedRotationEvents);
+            Logger.out.println(":Dropped: keys=" + mDroppedKeyEvents
+                    + " pointers=" + mDroppedPointerEvents
+                    + " trackballs=" + mDroppedTrackballEvents
+                    + " flips=" + mDroppedFlipEvents
+                    + " rotations=" + mDroppedRotationEvents);
         }
 
         // report network stats
         mNetworkMonitor.dump();
 
         if (crashedAtCycle < mCount - 1) {
-            System.err.println("** System appears to have crashed at event " + crashedAtCycle
+            Logger.err.println("** System appears to have crashed at event " + crashedAtCycle
                     + " of " + mCount + " using seed " + mSeed);
             return crashedAtCycle;
         } else {
             if (mVerbose > 0) {
-                System.out.println("// Monkey finished");
+                Logger.out.println("// Monkey finished");
             }
             return 0;
         }
+    }
+
+    private int injectEvent(MonkeyEvent ev) {
+        if (ev instanceof MonkeyMotionEvent motion) {
+            final MotionEvent motionEvent = motion.getMotionEventForInjection();
+            if (motionEvent.isFromSource(SOURCE_TOUCHSCREEN)) {
+                return injectTouchEvent(motionEvent);
+            }
+        }
+        return ev.injectEvent(mWm, mAm, mVerbose);
+    }
+
+    private boolean writeTouchEvent(MotionEvent motion, int pointerIndex,
+                                    int action) throws RemoteException {
+        int pointerId = motion.getPointerId(pointerIndex);
+        return mMonkeyService.writeTouchEvent(
+            pointerId, TOOL_TYPE_FINGER, action, motion.getX(pointerIndex),
+            motion.getY(pointerIndex), motion.getPressure(pointerIndex),
+            motion.getTouchMajor(pointerIndex), motion.getEventTime());
+    }
+
+    private int injectTouchEvent(MotionEvent event) {
+        try {
+            boolean success = true;
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                case MotionEvent.ACTION_POINTER_DOWN: {
+                    // Send a single write
+                    int pointerIndex = event.getActionIndex();
+                    success &= writeTouchEvent(event, pointerIndex, VirtualTouchEvent.ACTION_DOWN);
+                    break;
+                }
+                case MotionEvent.ACTION_MOVE: {
+                    // Iterate through pointers and send them all!
+                    // This would currently result in multiple motion events to be sent, because
+                    // there's an EV_SYN being sent after each "writeTouchEvent". To avoid this,
+                    // we would ideally only send EV_SYN at the last call to "writeTouchEvent".
+                    // However, the current approach should be good enough, and batching
+                    // should help lump the events together, anyways.
+                    for (int pointerIndex = 0; pointerIndex < event.getPointerCount();
+                            pointerIndex++) {
+                        success &= writeTouchEvent(event, pointerIndex,
+                                VirtualTouchEvent.ACTION_MOVE);
+                    }
+                    break;
+                }
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_POINTER_UP: {
+                    // Send a single write
+                    int pointerIndex = event.getActionIndex();
+                    int resolvedAction = VirtualTouchEvent.ACTION_UP;
+                    if ((event.getFlags() & MotionEvent.FLAG_CANCELED) != 0) {
+                        resolvedAction = VirtualTouchEvent.ACTION_CANCEL;
+                    }
+                    success &= writeTouchEvent(event, pointerIndex, resolvedAction);
+                    break;
+                }
+                case MotionEvent.ACTION_CANCEL: {
+                    // Cancel all pointers!
+                    for (int pointerIndex = 0; pointerIndex < event.getPointerCount();
+                            pointerIndex++) {
+                        success &= writeTouchEvent(event, pointerIndex,
+                                                    VirtualTouchEvent.ACTION_CANCEL);
+                    }
+                    break;
+                }
+                default:
+                    throw new RuntimeException("Unhandled action " + event);
+            }
+            return success ? MonkeyEvent.INJECT_SUCCESS : MonkeyEvent.INJECT_FAIL;
+        } catch (RemoteException exc) {
+            exc.rethrowAsRuntimeException();
+        }
+        return MonkeyEvent.INJECT_FAIL;
     }
 
     /**
@@ -756,11 +904,12 @@ public class Monkey {
 
         try {
             String opt;
+            Set<String> validPackages = new HashSet<>();
             while ((opt = nextOption()) != null) {
                 if (opt.equals("-s")) {
                     mSeed = nextOptionLong("Seed");
                 } else if (opt.equals("-p")) {
-                    mValidPackages.add(nextOptionData());
+                    validPackages.add(nextOptionData());
                 } else if (opt.equals("-c")) {
                     mMainCategories.add(nextOptionData());
                 } else if (opt.equals("-v")) {
@@ -779,6 +928,8 @@ public class Monkey {
                     mKillProcessAfterError = true;
                 } else if (opt.equals("--hprof")) {
                     mGenerateHprof = true;
+                } else if (opt.equals("--match-description")) {
+                    mMatchDescription = nextOptionData();
                 } else if (opt.equals("--pct-touch")) {
                     int i = MonkeySourceRandom.FACTOR_TOUCH;
                     mFactors[i] = -nextOptionLong("touch events percentage");
@@ -812,6 +963,9 @@ public class Monkey {
                 } else if (opt.equals("--pct-pinchzoom")) {
                     int i = MonkeySourceRandom.FACTOR_PINCHZOOM;
                     mFactors[i] = -nextOptionLong("pinch zoom events percentage");
+                } else if (opt.equals("--pct-permission")) {
+                    int i = MonkeySourceRandom.FACTOR_PERMISSION;
+                    mFactors[i] = -nextOptionLong("runtime permission toggle events percentage");
                 } else if (opt.equals("--pkg-blacklist-file")) {
                     mPkgBlacklistFile = nextOptionData();
                 } else if (opt.equals("--pkg-whitelist-file")) {
@@ -845,17 +999,20 @@ public class Monkey {
                 } else if (opt.equals("--periodic-bugreport")){
                     mGetPeriodicBugreport = true;
                     mBugreportFrequency = nextOptionLong("Number of iterations");
+                } else if (opt.equals("--permission-target-system")){
+                    mPermissionTargetSystem = true;
                 } else if (opt.equals("-h")) {
                     showUsage();
                     return false;
                 } else {
-                    System.err.println("** Error: Unknown option: " + opt);
+                    Logger.err.println("** Error: Unknown option: " + opt);
                     showUsage();
                     return false;
                 }
             }
+            MonkeyUtils.getPackageFilter().addValidPackages(validPackages);
         } catch (RuntimeException ex) {
-            System.err.println("** Error: " + ex.toString());
+            Logger.err.println("** Error: " + ex.toString());
             showUsage();
             return false;
         }
@@ -865,7 +1022,7 @@ public class Monkey {
         if (mServerPort == -1) {
             String countStr = nextArg();
             if (countStr == null) {
-                System.err.println("** Error: Count not specified");
+                Logger.err.println("** Error: Count not specified");
                 showUsage();
                 return false;
             }
@@ -873,7 +1030,7 @@ public class Monkey {
             try {
                 mCount = Integer.parseInt(countStr);
             } catch (NumberFormatException e) {
-                System.err.println("** Error: Count is not a number");
+                Logger.err.println("** Error: Count is not a number: \"" + countStr + "\"");
                 showUsage();
                 return false;
             }
@@ -889,7 +1046,7 @@ public class Monkey {
      * @param list The destination list.
      * @return Returns false if any error occurs.
      */
-    private static boolean loadPackageListFromFile(String fileName, HashSet<String> list) {
+    private static boolean loadPackageListFromFile(String fileName, Set<String> list) {
         BufferedReader reader = null;
         try {
             reader = new BufferedReader(new FileReader(fileName));
@@ -901,14 +1058,14 @@ public class Monkey {
                 }
             }
         } catch (IOException ioe) {
-            System.err.println(ioe);
+            Logger.err.println("" + ioe);
             return false;
         } finally {
             if (reader != null) {
                 try {
                     reader.close();
                 } catch (IOException ioe) {
-                    System.err.println(ioe);
+                    Logger.err.println("" + ioe);
                 }
             }
         }
@@ -916,25 +1073,29 @@ public class Monkey {
     }
 
     /**
-     * Load package blacklist or whitelist (if specified).
+     * Load package denylist or allowlist (if specified).
      *
      * @return Returns false if any error occurs.
      */
     private boolean loadPackageLists() {
-        if (((mPkgWhitelistFile != null) || (mValidPackages.size() > 0))
+        if (((mPkgWhitelistFile != null) || (MonkeyUtils.getPackageFilter().hasValidPackages()))
                 && (mPkgBlacklistFile != null)) {
-            System.err.println("** Error: you can not specify a package blacklist "
+            Logger.err.println("** Error: you can not specify a package blacklist "
                     + "together with a whitelist or individual packages (via -p).");
             return false;
         }
+        Set<String> validPackages = new HashSet<>();
         if ((mPkgWhitelistFile != null)
-                && (!loadPackageListFromFile(mPkgWhitelistFile, mValidPackages))) {
+                && (!loadPackageListFromFile(mPkgWhitelistFile, validPackages))) {
             return false;
         }
+        MonkeyUtils.getPackageFilter().addValidPackages(validPackages);
+        Set<String> invalidPackages = new HashSet<>();
         if ((mPkgBlacklistFile != null)
-                && (!loadPackageListFromFile(mPkgBlacklistFile, mInvalidPackages))) {
+                && (!loadPackageListFromFile(mPkgBlacklistFile, invalidPackages))) {
             return false;
         }
+        MonkeyUtils.getPackageFilter().addInvalidPackages(invalidPackages);
         return true;
     }
 
@@ -953,32 +1114,33 @@ public class Monkey {
      * @return Returns true if all system interfaces were available.
      */
     private boolean getSystemInterfaces() {
-        mAm = ActivityManagerNative.getDefault();
+        mAm = ActivityManager.getService();
         if (mAm == null) {
-            System.err.println("** Error: Unable to connect to activity manager; is the system "
+            Logger.err.println("** Error: Unable to connect to activity manager; is the system "
                     + "running?");
             return false;
         }
 
         mWm = IWindowManager.Stub.asInterface(ServiceManager.getService("window"));
+
         if (mWm == null) {
-            System.err.println("** Error: Unable to connect to window manager; is the system "
+            Logger.err.println("** Error: Unable to connect to window manager; is the system "
                     + "running?");
             return false;
         }
 
         mPm = IPackageManager.Stub.asInterface(ServiceManager.getService("package"));
         if (mPm == null) {
-            System.err.println("** Error: Unable to connect to package manager; is the system "
+            Logger.err.println("** Error: Unable to connect to package manager; is the system "
                     + "running?");
             return false;
         }
 
         try {
-            mAm.setActivityController(new ActivityController());
+            mAm.setActivityController(new ActivityController(), true);
             mNetworkMonitor.register(mAm);
         } catch (RemoteException e) {
-            System.err.println("** Failed talking with activity manager!");
+            Logger.err.println("** Failed talking with activity manager!");
             return false;
         }
 
@@ -1002,39 +1164,40 @@ public class Monkey {
                     intent.addCategory(category);
                 }
                 List<ResolveInfo> mainApps = mPm.queryIntentActivities(intent, null, 0,
-                        UserHandle.myUserId());
+                        ActivityManager.getCurrentUser()).getList();
                 if (mainApps == null || mainApps.size() == 0) {
-                    System.err.println("// Warning: no activities found for category " + category);
+                    Logger.err.println("// Warning: no activities found for category " + category);
                     continue;
                 }
                 if (mVerbose >= 2) { // very verbose
-                    System.out.println("// Selecting main activities from category " + category);
+                    Logger.out.println("// Selecting main activities from category " + category);
                 }
                 final int NA = mainApps.size();
                 for (int a = 0; a < NA; a++) {
                     ResolveInfo r = mainApps.get(a);
                     String packageName = r.activityInfo.applicationInfo.packageName;
-                    if (checkEnteringPackage(packageName)) {
+                    if (MonkeyUtils.getPackageFilter().checkEnteringPackage(packageName)) {
                         if (mVerbose >= 2) { // very verbose
-                            System.out.println("//   + Using main activity " + r.activityInfo.name
+                            Logger.out.println("//   + Using main activity " + r.activityInfo.name
                                     + " (from package " + packageName + ")");
                         }
-                        mMainApps.add(new ComponentName(packageName, r.activityInfo.name));
+                        mMainApps.put(
+                            new ComponentName(packageName, r.activityInfo.name), category);
                     } else {
                         if (mVerbose >= 3) { // very very verbose
-                            System.out.println("//   - NOT USING main activity "
+                            Logger.out.println("//   - NOT USING main activity "
                                     + r.activityInfo.name + " (from package " + packageName + ")");
                         }
                     }
                 }
             }
         } catch (RemoteException e) {
-            System.err.println("** Failed talking with package manager!");
+            Logger.err.println("** Failed talking with package manager!");
             return false;
         }
 
         if (mMainApps.size() == 0) {
-            System.out.println("** No activities found to run, monkey aborted.");
+            Logger.out.println("** No activities found to run, monkey aborted.");
             return false;
         }
 
@@ -1058,142 +1221,146 @@ public class Monkey {
         boolean shouldAbort = false;
         boolean systemCrashed = false;
 
-        // TO DO : The count should apply to each of the script file.
-        while (!systemCrashed && cycleCounter < mCount) {
-            synchronized (this) {
-                if (mRequestProcRank) {
-                    reportProcRank();
-                    mRequestProcRank = false;
-                }
-                if (mRequestAnrTraces) {
-                    mRequestAnrTraces = false;
-                    shouldReportAnrTraces = true;
-                }
-                if (mRequestAnrBugreport){
-                    getBugreport("anr_" + mReportProcessName + "_");
-                    mRequestAnrBugreport = false;
-                }
-                if (mRequestWatchdogBugreport) {
-                    System.out.println("Print the watchdog report");
-                    getBugreport("anr_watchdog_");
-                    mRequestWatchdogBugreport = false;
-                }
-                if (mRequestAppCrashBugreport){
-                    getBugreport("app_crash" + mReportProcessName + "_");
-                    mRequestAppCrashBugreport = false;
-                }
-                if (mRequestPeriodicBugreport){
-                    getBugreport("Bugreport_");
-                    mRequestPeriodicBugreport = false;
-                }
-                if (mRequestDumpsysMemInfo) {
-                    mRequestDumpsysMemInfo = false;
-                    shouldReportDumpsysMemInfo = true;
-                }
-                if (mMonitorNativeCrashes) {
-                    // first time through, when eventCounter == 0, just set up
-                    // the watcher (ignore the error)
-                    if (checkNativeCrashes() && (eventCounter > 0)) {
-                        System.out.println("** New native crash detected.");
-                        if (mRequestBugreport) {
-                            getBugreport("native_crash_");
+        try {
+            // TO DO : The count should apply to each of the script file.
+            while (!systemCrashed && cycleCounter < mCount) {
+                synchronized (this) {
+                    if (mRequestProcRank) {
+                        reportProcRank();
+                        mRequestProcRank = false;
+                    }
+                    if (mRequestAnrTraces) {
+                        mRequestAnrTraces = false;
+                        shouldReportAnrTraces = true;
+                    }
+                    if (mRequestAnrBugreport){
+                        getBugreport("anr_" + mReportProcessName + "_");
+                        mRequestAnrBugreport = false;
+                    }
+                    if (mRequestWatchdogBugreport) {
+                        Logger.out.println("Print the watchdog report");
+                        getBugreport("anr_watchdog_");
+                        mRequestWatchdogBugreport = false;
+                    }
+                    if (mRequestAppCrashBugreport){
+                        getBugreport("app_crash" + mReportProcessName + "_");
+                        mRequestAppCrashBugreport = false;
+                    }
+                    if (mRequestPeriodicBugreport){
+                        getBugreport("Bugreport_");
+                        mRequestPeriodicBugreport = false;
+                    }
+                    if (mRequestDumpsysMemInfo) {
+                        mRequestDumpsysMemInfo = false;
+                        shouldReportDumpsysMemInfo = true;
+                    }
+                    if (mMonitorNativeCrashes) {
+                        // first time through, when eventCounter == 0, just set up
+                        // the watcher (ignore the error)
+                        if (checkNativeCrashes() && (eventCounter > 0)) {
+                            Logger.out.println("** New native crash detected.");
+                            if (mRequestBugreport) {
+                                getBugreport("native_crash_");
+                            }
+                            mAbort = mAbort || !mIgnoreNativeCrashes || mKillProcessAfterError;
                         }
-                        mAbort = mAbort || !mIgnoreNativeCrashes || mKillProcessAfterError;
                     }
-                }
-                if (mAbort) {
-                    shouldAbort = true;
-                }
-                if (mWatchdogWaiting) {
-                    mWatchdogWaiting = false;
-                    notifyAll();
-                }
-            }
-
-            // Report ANR, dumpsys after releasing lock on this.
-            // This ensures the availability of the lock to Activity controller's appNotResponding
-            if (shouldReportAnrTraces) {
-               shouldReportAnrTraces = false;
-               reportAnrTraces();
-            }
-
-            if (shouldReportDumpsysMemInfo) {
-               shouldReportDumpsysMemInfo = false;
-               reportDumpsysMemInfo();
-            }
-
-            if (shouldAbort) {
-               shouldAbort = false;
-               System.out.println("** Monkey aborted due to error.");
-               System.out.println("Events injected: " + eventCounter);
-               return eventCounter;
-            }
-
-            // In this debugging mode, we never send any events. This is
-            // primarily here so you can manually test the package or category
-            // limits, while manually exercising the system.
-            if (mSendNoEvents) {
-                eventCounter++;
-                cycleCounter++;
-                continue;
-            }
-
-            if ((mVerbose > 0) && (eventCounter % 100) == 0 && eventCounter != 0) {
-                String calendarTime = MonkeyUtils.toCalendarTime(System.currentTimeMillis());
-                long systemUpTime = SystemClock.elapsedRealtime();
-                System.out.println("    //[calendar_time:" + calendarTime + " system_uptime:"
-                                   + systemUpTime + "]");
-                System.out.println("    // Sending event #" + eventCounter);
-            }
-
-            MonkeyEvent ev = mEventSource.getNextEvent();
-            if (ev != null) {
-                int injectCode = ev.injectEvent(mWm, mAm, mVerbose);
-                if (injectCode == MonkeyEvent.INJECT_FAIL) {
-                    System.out.println("    // Injection Failed");
-                    if (ev instanceof MonkeyKeyEvent) {
-                        mDroppedKeyEvents++;
-                    } else if (ev instanceof MonkeyMotionEvent) {
-                        mDroppedPointerEvents++;
-                    } else if (ev instanceof MonkeyFlipEvent) {
-                        mDroppedFlipEvents++;
-                    } else if (ev instanceof MonkeyRotationEvent) {
-                        mDroppedRotationEvents++;
+                    if (mAbort) {
+                        shouldAbort = true;
                     }
-                } else if (injectCode == MonkeyEvent.INJECT_ERROR_REMOTE_EXCEPTION) {
-                    systemCrashed = true;
-                    System.err.println("** Error: RemoteException while injecting event.");
-                } else if (injectCode == MonkeyEvent.INJECT_ERROR_SECURITY_EXCEPTION) {
-                    systemCrashed = !mIgnoreSecurityExceptions;
-                    if (systemCrashed) {
-                        System.err.println("** Error: SecurityException while injecting event.");
+                    if (mWatchdogWaiting) {
+                        mWatchdogWaiting = false;
+                        notifyAll();
                     }
                 }
 
-                // Don't count throttling as an event.
-                if (!(ev instanceof MonkeyThrottleEvent)) {
+                // Report ANR, dumpsys after releasing lock on this.
+                // This ensures the availability of the lock to Activity controller's appNotResponding
+                if (shouldReportAnrTraces) {
+                    shouldReportAnrTraces = false;
+                    reportAnrTraces();
+                }
+
+                if (shouldReportDumpsysMemInfo) {
+                    shouldReportDumpsysMemInfo = false;
+                    reportDumpsysMemInfo();
+                }
+
+                if (shouldAbort) {
+                    shouldAbort = false;
+                    Logger.out.println("** Monkey aborted due to error.");
+                    Logger.out.println("Events injected: " + eventCounter);
+                    return eventCounter;
+                }
+
+                // In this debugging mode, we never send any events. This is
+                // primarily here so you can manually test the package or category
+                // limits, while manually exercising the system.
+                if (mSendNoEvents) {
                     eventCounter++;
-                    if (mCountEvents) {
-                        cycleCounter++;
-                    }
-                }
-            } else {
-                if (!mCountEvents) {
                     cycleCounter++;
-                    writeScriptLog(cycleCounter);
-                    //Capture the bugreport after n iteration
-                    if (mGetPeriodicBugreport) {
-                        if ((cycleCounter % mBugreportFrequency) == 0) {
-                            mRequestPeriodicBugreport = true;
+                    continue;
+                }
+
+                if ((mVerbose > 0) && (eventCounter % 100) == 0 && eventCounter != 0) {
+                    String calendarTime = MonkeyUtils.toCalendarTime(System.currentTimeMillis());
+                    long systemUpTime = SystemClock.elapsedRealtime();
+                    Logger.out.println("    //[calendar_time:" + calendarTime + " system_uptime:"
+                            + systemUpTime + "]");
+                    Logger.out.println("    // Sending event #" + eventCounter);
+                }
+
+                MonkeyEvent ev = mEventSource.getNextEvent();
+                if (ev != null) {
+                    final int injectCode = injectEvent(ev);
+                    if (injectCode == MonkeyEvent.INJECT_FAIL) {
+                        Logger.out.println("    // Injection Failed");
+                        if (ev instanceof MonkeyKeyEvent) {
+                            mDroppedKeyEvents++;
+                        } else if (ev instanceof MonkeyMotionEvent) {
+                            mDroppedPointerEvents++;
+                        } else if (ev instanceof MonkeyFlipEvent) {
+                            mDroppedFlipEvents++;
+                        } else if (ev instanceof MonkeyRotationEvent) {
+                            mDroppedRotationEvents++;
+                        }
+                    } else if (injectCode == MonkeyEvent.INJECT_ERROR_REMOTE_EXCEPTION) {
+                        systemCrashed = true;
+                        Logger.err.println("** Error: RemoteException while injecting event.");
+                    } else if (injectCode == MonkeyEvent.INJECT_ERROR_SECURITY_EXCEPTION) {
+                        systemCrashed = !mIgnoreSecurityExceptions;
+                        if (systemCrashed) {
+                            Logger.err.println("** Error: SecurityException while injecting event.");
+                        }
+                    }
+
+                    // Don't count throttling as an event.
+                    if (!(ev instanceof MonkeyThrottleEvent)) {
+                        eventCounter++;
+                        if (mCountEvents) {
+                            cycleCounter++;
                         }
                     }
                 } else {
-                    // Event Source has signaled that we have no more events to process
-                    break;
+                    if (!mCountEvents) {
+                        cycleCounter++;
+                        writeScriptLog(cycleCounter);
+                        //Capture the bugreport after n iteration
+                        if (mGetPeriodicBugreport) {
+                            if ((cycleCounter % mBugreportFrequency) == 0) {
+                                mRequestPeriodicBugreport = true;
+                            }
+                        }
+                    } else {
+                        // Event Source has signaled that we have no more events to process
+                        break;
+                    }
                 }
             }
+        } catch (RuntimeException e) {
+            Logger.error("** Error: A RuntimeException occurred:", e);
         }
-        System.out.println("Events injected: " + eventCounter);
+        Logger.out.println("Events injected: " + eventCounter);
         return eventCounter;
     }
 
@@ -1209,7 +1376,7 @@ public class Monkey {
                 wait(2000);
             }
         } catch (RemoteException e) {
-            System.err.println("** Failed talking with activity manager!");
+            Logger.err.println("** Failed talking with activity manager!");
         } catch (InterruptedException e) {
         }
     }
@@ -1225,23 +1392,61 @@ public class Monkey {
 
         // shortcut path for usually empty directory, so we don't waste even
         // more objects
-        if ((tombstones == null) || (tombstones.length == 0)) {
+        if (tombstones == null || tombstones.length == 0) {
             mTombstones = null;
             return false;
         }
 
-        // use set logic to look for new files
-        HashSet<String> newStones = new HashSet<String>();
-        for (String x : tombstones) {
-            newStones.add(x);
-        }
+        boolean result = false;
 
-        boolean result = (mTombstones == null) || !mTombstones.containsAll(newStones);
+        // use set logic to look for new files
+        HashSet<Long> newStones = new HashSet<Long>();
+        for (String t : tombstones) {
+            if (t.startsWith(TOMBSTONE_PREFIX)) {
+                File f = new File(TOMBSTONES_PATH, t);
+                newStones.add(f.lastModified());
+                if (mTombstones == null || !mTombstones.contains(f.lastModified())) {
+                    result = true;
+                    waitForTombstoneToBeWritten(Paths.get(TOMBSTONES_PATH.getPath(), t));
+                    Logger.out.println("** New tombstone found: " + f.getAbsolutePath()
+                                       + ", size: " + f.length());
+                }
+            }
+        }
 
         // keep the new list for the next time
         mTombstones = newStones;
 
         return result;
+    }
+
+    /**
+     * Wait for the given tombstone file to be completely written.
+     *
+     * @param path The path of the tombstone file.
+     */
+    private void waitForTombstoneToBeWritten(Path path) {
+        boolean isWritten = false;
+        try {
+            // Ensure file is done writing by sleeping and comparing the previous and current size
+            for (int i = 0; i < NUM_READ_TOMBSTONE_RETRIES; i++) {
+                long size = Files.size(path);
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) { }
+                if (size > 0 && Files.size(path) == size) {
+                    //File size is bigger than 0 and hasn't changed
+                    isWritten = true;
+                    break;
+                }
+            }
+        } catch (IOException e) {
+            Logger.err.println("Failed to get tombstone file size: " + e.toString());
+        }
+        if (!isWritten) {
+            Logger.err.println("Incomplete tombstone file.");
+            return;
+        }
     }
 
     /**
@@ -1284,6 +1489,9 @@ public class Monkey {
             }
         }
         mCurArgData = null;
+        Logger.err.println("arg=\"" + arg + "\" mCurArgData=\"" + mCurArgData + "\" mNextArg="
+                + mNextArg + " argwas=\"" + mArgs[mNextArg-1] + "\"" + " nextarg=\"" +
+                mArgs[mNextArg] + "\"");
         return arg;
     }
 
@@ -1300,6 +1508,7 @@ public class Monkey {
             return null;
         }
         String data = mArgs[mNextArg];
+        Logger.err.println("data=\"" + data + "\"");
         mNextArg++;
         return data;
     }
@@ -1316,7 +1525,7 @@ public class Monkey {
         try {
             result = Long.parseLong(nextOptionData());
         } catch (NumberFormatException e) {
-            System.err.println("** Error: " + opt + " is not a number");
+            Logger.err.println("** Error: " + opt + " is not a number");
             throw e;
         }
         return result;
@@ -1347,11 +1556,13 @@ public class Monkey {
         usage.append("              [--ignore-security-exceptions]\n");
         usage.append("              [--monitor-native-crashes] [--ignore-native-crashes]\n");
         usage.append("              [--kill-process-after-error] [--hprof]\n");
+        usage.append("              [--match-description TEXT]\n");
         usage.append("              [--pct-touch PERCENT] [--pct-motion PERCENT]\n");
         usage.append("              [--pct-trackball PERCENT] [--pct-syskeys PERCENT]\n");
         usage.append("              [--pct-nav PERCENT] [--pct-majornav PERCENT]\n");
         usage.append("              [--pct-appswitch PERCENT] [--pct-flip PERCENT]\n");
         usage.append("              [--pct-anyevent PERCENT] [--pct-pinchzoom PERCENT]\n");
+        usage.append("              [--pct-permission PERCENT]\n");
         usage.append("              [--pkg-blacklist-file PACKAGE_BLACKLIST_FILE]\n");
         usage.append("              [--pkg-whitelist-file PACKAGE_WHITELIST_FILE]\n");
         usage.append("              [--wait-dbg] [--dbg-no-events]\n");
@@ -1365,7 +1576,8 @@ public class Monkey {
         usage.append("              [--script-log]\n");
         usage.append("              [--bugreport]\n");
         usage.append("              [--periodic-bugreport]\n");
+        usage.append("              [--permission-target-system]\n");
         usage.append("              COUNT\n");
-        System.err.println(usage.toString());
+        Logger.err.println(usage.toString());
     }
 }

@@ -6,11 +6,13 @@ If you're using IntelliJ...
 
     If this is your first time using IDEGen...
 
-        IDEA needs a lot of memory. Add "-Xms748m -Xmx748m" to your VM options
-        in "IDEA_HOME/bin/idea.vmoptions" on Linux or
-        "IntelliJ IDEA.app/Contents/Info.plist" on OS X.
+        Android is large, thus IDEA needs a lot of memory. Add "-Xms1g -Xmx5g" to
+        your VM options in "Help > Edit Custom VM" and increase the
+        file size limit in "Help -> Edit custom properties" by adding
+        "idea.max.intellisense.filesize=100000". Make sure to restart the IDE for
+        the new settings to take effect.
 
-        Create a JDK configuration named "1.6 (No Libraries)" by adding a new
+        Create a JDK configuration named "1.8 (No Libraries)" by adding a new
         JDK like you normally would and then removing all of the jar entries
         under the "Classpath" tab. This will ensure that you only get access to
         Android's core libraries and not those from your desktop VM.
@@ -36,7 +38,7 @@ If you're using Eclipse...
         Edit eclipse.ini ("Eclipse.app/Contents/MacOS/eclipse.ini" on OS X) and
         add "-Xms748m -Xmx748m" to your VM options.
 
-        Configure a JRE named "1.5 (No Libraries)" under "Preferences -> Java ->
+        Configure a JRE named "1.7 (No Libraries)" under "Preferences -> Java ->
         Installed JREs". Remove all of the jar entries underneath "JRE system
         libraries". Eclipse will not let you save your configuration unless at
         least one jar is present, so include a random jar that won't get in the
@@ -59,9 +61,9 @@ Excluding source roots and jars
     use Java's regular expression parser (see java.util.regex.Parser).
 
     You can create your own additional exclusion list by creating an
-    "excluded-paths" file in the project's root directory. For example, you
-    might exclude all apps except the Browser in your IDE configuration with
-    this regular expression: "^packages/apps/(?!Browser)".
+    "excluded-paths" file in the project's root directory or your vendor
+    directory. For example, you might exclude all apps except the Browser in your
+    IDE configuration with this regular expression: "^packages/apps/(?!Browser)".
 
 Controlling source root ordering (Eclipse)
 

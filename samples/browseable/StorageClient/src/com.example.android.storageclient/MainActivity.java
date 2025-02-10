@@ -15,8 +15,6 @@
 */
 
 
-
-
 package com.example.android.storageclient;
 
 import android.graphics.Color;

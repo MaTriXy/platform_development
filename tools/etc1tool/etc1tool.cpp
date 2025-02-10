@@ -28,7 +28,7 @@ int writePNGFile(const char* pOutput, png_uint_32 width, png_uint_32 height,
 const char* gpExeName;
 
 static
-void usage(char* message, ...) {
+void usage(const char* message, ...) {
     if (message) {
         va_list ap;
         va_start(ap, message);
@@ -97,11 +97,11 @@ int changeExtension(char* pPath, size_t pathCapacity, const char* pExtension) {
     return 0;
 }
 
-void PNGAPI user_error_fn(png_structp png_ptr, png_const_charp message) {
+void PNGAPI user_error_fn(png_structp /*png_ptr*/, png_const_charp message) {
     fprintf(stderr, "PNG error: %s\n", message);
 }
 
-void PNGAPI user_warning_fn(png_structp png_ptr, png_const_charp message) {
+void PNGAPI user_warning_fn(png_structp /*png_ptr*/, png_const_charp message) {
     fprintf(stderr, "PNG warning: %s\n", message);
 }
 
@@ -489,7 +489,6 @@ int main(int argc, char** argv) {
     bool bEncodeDecodeSeen = false;
     bool bEncode = false;
     bool bEncodeHeader = false;
-    bool bDecode = false;
     bool bShowDifference = false;
 
     for (int i = 1; i < argc; i++) {
@@ -517,7 +516,6 @@ int main(int argc, char** argv) {
                     bEncodeHeader = false;
                 } else if (strcmp(pArg, "--decode") == 0) {
                     multipleEncodeDecodeCheck(&bEncodeDecodeSeen);
-                    bDecode = true;
                 } else if (strcmp(pArg, "--showDifference") == 0) {
                     if (bShowDifference) {
                         usage("Only one --showDifference option allowed.\n");

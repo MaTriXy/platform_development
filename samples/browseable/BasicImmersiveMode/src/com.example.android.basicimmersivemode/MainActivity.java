@@ -15,8 +15,6 @@
 */
 
 
-
-
 package com.example.android.basicimmersivemode;
 
 import android.graphics.Color;

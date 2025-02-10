@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-#
 # Copyright (C) 2014 The Android Open Source Project
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -86,32 +84,6 @@ backtrace:
     #07 pc 0000000000014e90  /system/lib64/libc.so (__start_thread+16)
 """
 
-mips = """
-Build fingerprint: 'Android/aosp_mips/generic_mips:4.4.3.43.43.43/AOSP/enh06302258:eng/test-keys'
-Revision: '0'
-ABI: 'mips'
-pid: 958, tid: 960, name: crasher  >>> crasher <<<
-signal 6 (SIGABRT), code -6 (SI_TKILL), fault addr --------
- zr 00000000  at 802babc0  v0 00000000  v1 77b99dd0
- a0 000003be  a1 000003c0  a2 00000006  a3 00000000
- t0 00000000  t1 9e7f5440  t2 00000020  t3 ffffff18
- t4 77a9c000  t5 00000001  t6 00000000  t7 00000000
- s0 000003c0  s1 77b99dd8  s2 00000000  s3 00000006
- s4 77db2028  s5 000003be  s6 77c39fa8  s7 77b99dd0
- t8 00000000  t9 77c89e80  k0 00000000  k1 00000000
- gp 77cce350  sp 77b99c78  s8 77db2020  ra 77c3b48c
- hi 00000000  lo 00000008 bva 7fff7008 epc 77c89e94
-
-backtrace:
-    #00 pc 00067e94  /system/lib/libc.so (tgkill+20)
-    #01 pc 0001948c  /system/lib/libc.so (pthread_kill+244)
-    #02 pc 0001b0e8  /system/lib/libc.so (raise+60)
-    #03 pc 00012908  /system/lib/libc.so (abort+104)
-    #04 pc 000012a4  /system/xbin/crasher
-    #05 pc 00018008  /system/lib/libc.so (__pthread_start(void*)+96)
-    #06 pc 00013198  /system/lib/libc.so (__start_thread+36)
-"""
-
 x86 = """
 Build fingerprint: 'Android/aosp_x86_64/generic_x86_64:4.4.3.43.43.43/AOSP/enh06302258:eng/test-keys'
 Revision: '0'
@@ -157,4 +129,72 @@ backtrace:
     #06 pc 00000000000215ae  /system/lib64/libc.so (__pthread_start(void*)+46)
     #07 pc 000000000001d3eb  /system/lib64/libc.so (__start_thread+11)
     #08 pc 00000000000138f5  /system/lib64/libc.so (__bionic_clone+53)
+"""
+
+riscv64 = """
+Build fingerprint: 'generic/aosp_riscv64/vsoc_riscv64:4.4.3.43.43.43/AOSP/eng.prasha.20230307.172954:eng/test-keys'
+Revision: '0'
+ABI: 'riscv64'
+pid: 794, tid: 794, name: crasher64  >>> crasher64 <<<
+signal 6 (SIGABRT), code -1 (SI_QUEUE), fault addr --------
+    gp  ffffffff81dabe60  tp  00ffffff1aae0050  t0  000000000002ba76  t1  00ffffff140d598c
+    t2  00000000d82989b1  t3  00ffffff1407e570  t4  00ffffff1ac2d000  t5  0000000000000018
+    t6  0000000000000018  s0  000000000000031a  s1  000000000000031a  s2  ffffffffffffffff
+    s3  00ffffffca72dd20  s4  0000000000000000  s5  00fffff499ead378  s6  00fffff469ea7b90
+    s7  00aaaaaba6d2b2c8  s8  00fffff5fa3a1588  s9  0000000000000000  s10 0000000000000000
+    s11 0000000000000000  a0  0000000000000000  a1  000000000000031a  a2  0000000000000006
+    a3  00ffffffca72da00  a4  0000000000000000  a5  000000007fffffff  a6  000000007fffffff
+    a7  00000000000000f0
+    pc  00ffffff1407e582  ra  00ffffff140811d2  sp  00ffffffca72d9d0
+
+backtrace:
+      #00 pc 0000000000049582  /apex/com.android.runtime/lib64/bionic/libc.so (syscall+18)
+      #01 pc 000000000004c1ce  /apex/com.android.runtime/lib64/bionic/libc.so (abort+98)
+      #02 pc 0000000000004012  /system/bin/crasher64 (maybe_abort+40)
+      #03 pc 000000000000457c  /system/bin/crasher64 (do_action+966)
+      #04 pc 0000000000005528  /system/bin/crasher64 (main+78)
+      #05 pc 0000000000047cd4  /apex/com.android.runtime/lib64/bionic/libc.so (__libc_init+80)
+"""
+
+libmemunreachable = """
+ Unreachable memory
+  48 bytes in 2 unreachable allocations
+  ABI: 'arm'
+
+  24 bytes unreachable at a11e6748
+   and 24 similar unreachable bytes in 1 allocation
+   contents:
+   a11e6748: 63 6f 6d 2e 61 6e 64 72 6f 69 64 2e 73 79 73 74 com.android.syst
+   a11e6758: 65 6d 75 69 00 00 00 00                         emui....
+          #00  pc 000076ae  /system/lib/libcutils.so (set_process_name+45)
+          #01  pc 000989d6  /system/lib/libandroid_runtime.so (android_os_Process_setArgV0(_JNIEnv*, _jobject*, _jstring*)+125)
+"""
+
+# This is a long crash in ASAN format, which does not pad frame numbers. This should be used
+# in a test to ensure that the stack is not split into two (see stack_core's test_long_asan_crash).
+long_asan_crash = """
+Build fingerprint: 'Android/aosp_arm/generic_arm:4.4.3.43.43.43/AOSP/enh06302258:eng/test-keys'
+ABI: 'arm'
+
+     #0 0x727d4dfdaf  (/system/lib/libclang_rt.asan-arm-android.so+0x31daf)
+
+     #1 0x727d4e00af  (/system/lib/libclang_rt.asan-arm-android.so+0x320af)
+
+     #2 0x72778db0cf  (/data/lib/libc.so+0x740cf)
+
+     #3 0x725688a66f  (/does/not/matter/a.so+0x1066f)
+
+     #4 0x72568a02af  (/does/not/matter/a.so+0x262af)
+
+     #5 0x725689e313  (/does/not/matter/a.so+0x24313)
+
+     #6 0x72568a95eb  (/does/not/matter/a.so+0x2f5eb)
+
+     #7 0x725688de6f  (/does/not/matter/a.so+0x13e6f)
+
+     #8 0x72778ceeff  (/does/not/matter/a.so+0x67eff)
+
+     #9 0x7277884983  (/does/not/matter/a.so+0x1d983)
+
+     #10 0x7277884983  (/does/not/matter/a.so+0x1d983)
 """

@@ -40,18 +40,17 @@ import android.widget.Spinner;
 import android.widget.Toast;
 import android.widget.ToggleButton;
 
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 public class MediaProjectionDemo extends Activity {
     private static final String TAG = "MediaProjectionDemo";
     private static final int PERMISSION_CODE = 1;
-    private static final List<Resolution> RESOLUTIONS = new ArrayList<Resolution>() {{
-        add(new Resolution(640,360));
-        add(new Resolution(960,540));
-        add(new Resolution(1366,768));
-        add(new Resolution(1600,900));
-    }};
+    private static final List<Resolution> RESOLUTIONS = Arrays.asList(
+            new Resolution(640,360),
+            new Resolution(960,540),
+            new Resolution(1366,768),
+            new Resolution(1600,900));
 
     private int mScreenDensity;
     private MediaProjectionManager mProjectionManager;
@@ -64,6 +63,7 @@ public class MediaProjectionDemo extends Activity {
     private VirtualDisplay mVirtualDisplay;
     private Surface mSurface;
     private SurfaceView mSurfaceView;
+    private ToggleButton mToggle;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -85,6 +85,15 @@ public class MediaProjectionDemo extends Activity {
         s.setAdapter(arrayAdapter);
         s.setOnItemSelectedListener(new ResolutionSelector());
         s.setSelection(0);
+
+        mToggle = (ToggleButton) findViewById(R.id.screen_sharing_toggle);
+        mToggle.setSaveEnabled(false);
+    }
+
+    @Override
+    protected void onStop() {
+        stopScreenSharing();
+        super.onStop();
     }
 
     @Override
@@ -108,6 +117,7 @@ public class MediaProjectionDemo extends Activity {
             return;
         }
         mMediaProjection = mProjectionManager.getMediaProjection(resultCode, data);
+        mMediaProjection.registerCallback(new MediaProjectionCallback(), null);
         mVirtualDisplay = createVirtualDisplay();
     }
 
@@ -133,11 +143,15 @@ public class MediaProjectionDemo extends Activity {
     }
 
     private void stopScreenSharing() {
-        mScreenSharing = false;
-        if (mVirtualDisplay == null) {
-            return;
+        if (mToggle.isChecked()) {
+            mToggle.setChecked(false);
         }
-        mVirtualDisplay.release();
+
+        mScreenSharing = false;
+        if (mVirtualDisplay != null) {
+            mVirtualDisplay.release();
+            mVirtualDisplay = null;
+        }
     }
 
     private VirtualDisplay createVirtualDisplay() {

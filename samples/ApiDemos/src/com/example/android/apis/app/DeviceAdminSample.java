@@ -26,7 +26,9 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Bundle;
+import android.os.PersistableBundle;
 import android.preference.CheckBoxPreference;
 import android.preference.EditTextPreference;
 import android.preference.ListPreference;
@@ -41,6 +43,8 @@ import android.text.TextUtils;
 import android.util.Log;
 import android.widget.Toast;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -71,9 +75,13 @@ public class DeviceAdminSample extends PreferenceActivity {
     private static final String KEY_DISABLE_NOTIFICATIONS = "key_disable_notifications";
     private static final String KEY_DISABLE_UNREDACTED = "key_disable_unredacted";
     private static final String KEY_DISABLE_TRUST_AGENTS = "key_disable_trust_agents";
+    private static final String KEY_TRUST_AGENT_COMPONENT = "key_trust_agent_component";
+    private static final String KEY_TRUST_AGENT_FEATURES = "key_trust_agent_features";
     private static final String KEY_DISABLE_KEYGUARD_WIDGETS = "key_disable_keyguard_widgets";
     private static final String KEY_DISABLE_KEYGUARD_SECURE_CAMERA
             = "key_disable_keyguard_secure_camera";
+    private static final String KEY_DISABLE_FINGERPRINT = "key_disable_fingerprint";
+    private static final String KEY_DISABLE_REMOTE_INPUT = "key_disable_remote_input";
 
     private static final String KEY_CATEGORY_QUALITY = "key_category_quality";
     private static final String KEY_SET_PASSWORD = "key_set_password";
@@ -274,6 +282,10 @@ public class DeviceAdminSample extends PreferenceActivity {
         private CheckBoxPreference mDisableKeyguardNotificationCheckbox;
         private CheckBoxPreference mDisableKeyguardTrustAgentCheckbox;
         private CheckBoxPreference mDisableKeyguardUnredactedCheckbox;
+        private EditTextPreference mTrustAgentComponent;
+        private EditTextPreference mTrustAgentFeatures;
+        private CheckBoxPreference mDisableKeyguardFingerprintCheckbox;
+        private CheckBoxPreference mDisableKeyguardRemoteInputCheckbox;
 
         @Override
         public void onCreate(Bundle savedInstanceState) {
@@ -301,9 +313,25 @@ public class DeviceAdminSample extends PreferenceActivity {
                     (CheckBoxPreference) findPreference(KEY_DISABLE_UNREDACTED);
             mDisableKeyguardUnredactedCheckbox.setOnPreferenceChangeListener(this);
 
+            mDisableKeyguardFingerprintCheckbox =
+                    (CheckBoxPreference) findPreference(KEY_DISABLE_FINGERPRINT);
+            mDisableKeyguardFingerprintCheckbox.setOnPreferenceChangeListener(this);
+
+            mDisableKeyguardRemoteInputCheckbox =
+                    (CheckBoxPreference) findPreference(KEY_DISABLE_REMOTE_INPUT);
+            mDisableKeyguardRemoteInputCheckbox.setOnPreferenceChangeListener(this);
+
             mDisableKeyguardTrustAgentCheckbox =
                     (CheckBoxPreference) findPreference(KEY_DISABLE_TRUST_AGENTS);
             mDisableKeyguardTrustAgentCheckbox.setOnPreferenceChangeListener(this);
+
+            mTrustAgentComponent =
+                    (EditTextPreference) findPreference(KEY_TRUST_AGENT_COMPONENT);
+            mTrustAgentComponent.setOnPreferenceChangeListener(this);
+
+            mTrustAgentFeatures =
+                    (EditTextPreference) findPreference(KEY_TRUST_AGENT_FEATURES);
+            mTrustAgentFeatures.setOnPreferenceChangeListener(this);
         }
 
         // At onResume time, reload UI with current values as required
@@ -332,6 +360,10 @@ public class DeviceAdminSample extends PreferenceActivity {
                     DevicePolicyManager.KEYGUARD_DISABLE_UNREDACTED_NOTIFICATIONS : 0;
             flags |= mDisableKeyguardTrustAgentCheckbox.isChecked() ?
                     DevicePolicyManager.KEYGUARD_DISABLE_TRUST_AGENTS : 0;
+            flags |= mDisableKeyguardFingerprintCheckbox.isChecked() ?
+                    DevicePolicyManager.KEYGUARD_DISABLE_FINGERPRINT : 0;
+            flags |= mDisableKeyguardRemoteInputCheckbox.isChecked() ?
+                    DevicePolicyManager.KEYGUARD_DISABLE_REMOTE_INPUT : 0;
             return flags;
         }
 
@@ -340,8 +372,8 @@ public class DeviceAdminSample extends PreferenceActivity {
             if (super.onPreferenceChange(preference, newValue)) {
                 return true;
             }
-            boolean value = (Boolean) newValue;
             if (preference == mEnableCheckbox) {
+                boolean value = (Boolean) newValue;
                 if (value != mAdminActive) {
                     if (value) {
                         // Launch the activity to have the user enable our admin.
@@ -359,6 +391,7 @@ public class DeviceAdminSample extends PreferenceActivity {
                     }
                 }
             } else if (preference == mDisableCameraCheckbox) {
+                boolean value = (Boolean) newValue;
                 mDPM.setCameraDisabled(mDeviceAdminSample, value);
                 // Delay update because the change is only applied after exiting this method.
                 postReloadSummaries();
@@ -366,18 +399,39 @@ public class DeviceAdminSample extends PreferenceActivity {
                     || preference == mDisableKeyguardSecureCameraCheckbox
                     || preference == mDisableKeyguardNotificationCheckbox
                     || preference == mDisableKeyguardUnredactedCheckbox
-                    || preference == mDisableKeyguardTrustAgentCheckbox) {
-                // Delay update because the change is only applied after exiting this method.
-                getView().post(new Runnable() {
-                    @Override
-                    public void run() {
-                        mDPM.setKeyguardDisabledFeatures(mDeviceAdminSample,
-                                createKeyguardDisabledFlag());
-                    }
-                });
+                    || preference == mDisableKeyguardTrustAgentCheckbox
+                    || preference == mDisableKeyguardFingerprintCheckbox
+                    || preference == mDisableKeyguardRemoteInputCheckbox
+                    || preference == mTrustAgentComponent
+                    || preference == mTrustAgentFeatures) {
+                postUpdateDpmDisableFeatures();
                 postReloadSummaries();
             }
             return true;
+        }
+
+        private void postUpdateDpmDisableFeatures() {
+            getView().post(new Runnable() {
+                @Override
+                public void run() {
+                    mDPM.setKeyguardDisabledFeatures(mDeviceAdminSample,
+                            createKeyguardDisabledFlag());
+                    String component = mTrustAgentComponent.getText();
+                    if (component != null) {
+                        ComponentName agent = ComponentName.unflattenFromString(component);
+                        if (agent != null) {
+                            String featureString = mTrustAgentFeatures.getText();
+                            if (featureString != null) {
+                                PersistableBundle bundle = new PersistableBundle();
+                                bundle.putStringArray("features", featureString.split(","));
+                                mDPM.setTrustAgentConfiguration(mDeviceAdminSample, agent, bundle);
+                            }
+                        } else {
+                            Log.w(TAG, "Invalid component: " + component);
+                        }
+                    }
+                }
+            });
         }
 
         @Override
@@ -416,6 +470,29 @@ public class DeviceAdminSample extends PreferenceActivity {
                         R.string.keyguard_trust_agents_disabled
                         : R.string.keyguard_trust_agents_enabled);
             mDisableKeyguardTrustAgentCheckbox.setSummary(keyguardEnableTrustAgentSummary);
+
+            String keyguardEnableFingerprintSummary = getString(
+                    (disabled & DevicePolicyManager.KEYGUARD_DISABLE_FINGERPRINT) != 0 ?
+                        R.string.keyguard_fingerprint_disabled
+                        : R.string.keyguard_fingerprint_enabled);
+            mDisableKeyguardFingerprintCheckbox.setSummary(keyguardEnableFingerprintSummary);
+
+            String keyguardEnableRemoteInputSummary = getString(
+                    (disabled & DevicePolicyManager.KEYGUARD_DISABLE_REMOTE_INPUT) != 0 ?
+                        R.string.keyguard_remote_input_disabled
+                        : R.string.keyguard_remote_input_enabled);
+            mDisableKeyguardRemoteInputCheckbox.setSummary(keyguardEnableRemoteInputSummary);
+
+            final SharedPreferences prefs = getPreferenceManager().getSharedPreferences();
+            final boolean trustDisabled =
+                    (disabled & DevicePolicyManager.KEYGUARD_DISABLE_TRUST_AGENTS) != 0;
+            String component = prefs.getString(mTrustAgentComponent.getKey(), null);
+            mTrustAgentComponent.setSummary(component);
+            mTrustAgentComponent.setEnabled(trustDisabled);
+
+            String features = prefs.getString(mTrustAgentFeatures.getKey(), null);
+            mTrustAgentFeatures.setSummary(features);
+            mTrustAgentFeatures.setEnabled(trustDisabled);
         }
 
         /** Updates the device capabilities area (dis/enabling) as the admin is (de)activated */
@@ -426,6 +503,8 @@ public class DeviceAdminSample extends PreferenceActivity {
             mDisableKeyguardNotificationCheckbox.setEnabled(enabled);
             mDisableKeyguardUnredactedCheckbox.setEnabled(enabled);
             mDisableKeyguardTrustAgentCheckbox.setEnabled(enabled);
+            mTrustAgentComponent.setEnabled(enabled);
+            mTrustAgentFeatures.setEnabled(enabled);
         }
     }
 
@@ -1064,5 +1143,8 @@ public class DeviceAdminSample extends PreferenceActivity {
             showToast(context, message);
             Log.v(TAG, message);
         }
+    }
+
+    public static class DeviceAdminSampleReceiver2 extends DeviceAdminReceiver {
     }
 }

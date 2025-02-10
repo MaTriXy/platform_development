@@ -21,7 +21,6 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 
 import android.app.Activity;
-import android.app.ActivityManagerNative;
 import android.app.IActivityController;
 import android.app.IActivityManager;
 import android.app.Service;
@@ -78,7 +77,7 @@ public class CacheAbuser extends Activity {
                 } catch (IOException e) {
                     Log.w("CacheAbuser", "Write failed to " + file + ": " + e);
                     try {
-                        wait(5*1000);
+                        Thread.sleep(5*1000);
                     } catch (InterruptedException e1) {
                     }
                 } finally {
