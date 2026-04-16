@@ -16,14 +16,13 @@ use std::{
     cell::OnceCell,
     collections::BTreeSet,
     env,
-    fs::{create_dir, create_dir_all, read_dir, write},
-    os::unix::fs::symlink,
+    fs::{create_dir_all, read_dir, write},
     path::Path,
-    process::Command,
 };
 
 use anyhow::{anyhow, bail, Context, Result};
 use crates_index::DependencyKind;
+use crates_io_util::CratesIoIndex;
 use google_metadata::GoogleMetadata;
 use itertools::Itertools;
 use license_checker::find_licenses;
@@ -32,15 +31,13 @@ use repo_config::RepoConfig;
 use rooted_path::RootedPath;
 use semver::{Version, VersionReq};
 use serde::Serialize;
-use spdx::Licensee;
 
 use crate::{
     android_bp::cargo_embargo_autoconfig,
     copy_dir,
     crate_collection::CrateCollection,
     crate_type::Crate,
-    crates_io::{AndroidDependencies, CratesIoIndex, DependencyChanges, SafeVersions},
-    license::{most_restrictive_type, update_module_license_files},
+    crates_io::{AndroidDependencies, DependencyChanges, SafeVersions},
     managed_crate::ManagedCrate,
     pseudo_crate::{CargoVendorDirty, PseudoCrate},
     upgradable::{IsUpgradableTo, MatchesWithCompatibilityRule, SemverCompatibilityRule},
@@ -169,11 +166,10 @@ impl ManagedRepo {
 
         let cio_crate = self.crates_io.get_crate(crate_name)?;
 
-        for version in cio_crate.versions() {
+        for version in cio_crate.safe_versions() {
             println!("Version {}", version.version());
             let mut found_problems = false;
             for (dep, req) in version.android_deps_with_version_reqs() {
-                println!("Found dep {}", dep.crate_name());
                 let cc = if managed_crates.contains_crate(dep.crate_name()) {
                     &managed_crates
                 } else {
@@ -268,53 +264,7 @@ impl ManagedRepo {
         println!("  Finding license files");
         let licenses = find_licenses(krate.path().abs(), krate.name(), krate.license())?;
 
-        if !licenses.unsatisfied.is_empty() && licenses.satisfied.is_empty() {
-            let mut satisfied = false;
-            // Sometimes multiple crates live in a single GitHub repo. A common case
-            // is a crate with an associated proc_macro crate. In such cases, the individual
-            // crates are in subdirectories with license files at root of the repo, and
-            // the license files don't get distributed with the crates.
-            // So, if we didn't find a license file, try to guess the URL of the appropriate
-            // license file and download it. This is incredibly hacky, and only supports
-            // the most common case, which is LICENSE-APACHE.
-            if licenses.unsatisfied.len() == 1 {
-                let req = licenses.unsatisfied.first().unwrap();
-                if let Some(repository) = krate.repository() {
-                    if *req == Licensee::parse("Apache-2.0").unwrap().into_req() {
-                        let url = format!("{}/master/LICENSE-APACHE", repository);
-                        let body = reqwest::blocking::get(
-                            url.replace("github.com", "raw.githubusercontent.com"),
-                        )?
-                        .text()?;
-                        write(krate.path().abs().join("LICENSE"), body)?;
-                        let patch_dir = krate.path().abs().join("patches");
-                        create_dir(&patch_dir)?;
-                        let output = Command::new("diff")
-                            .args(["-u", "/dev/null", "LICENSE"])
-                            .current_dir(krate.path().abs())
-                            .output()?;
-                        write(patch_dir.join("LICENSE.patch"), output.stdout)?;
-                        satisfied = true;
-                    }
-                }
-            }
-            if !satisfied {
-                return Err(anyhow!(
-                    "Could not find license files for all licenses. Missing {}",
-                    licenses.unsatisfied.iter().join(", ")
-                ));
-            }
-        }
-
-        // If there's a single applicable license file, symlink it to LICENSE.
-        if licenses.satisfied.len() == 1 && licenses.unsatisfied.is_empty() {
-            let license_file = krate.path().join("LICENSE")?;
-            if !license_file.abs().exists() {
-                symlink(licenses.satisfied.iter().next().unwrap().1, license_file)?;
-            }
-        }
-
-        update_module_license_files(&krate.path().abs(), &licenses)?;
+        licenses.update_module_license_files(&krate.path().abs())?;
 
         println!("  Creating METADATA");
         let metadata = GoogleMetadata::init(
@@ -322,7 +272,7 @@ impl ManagedRepo {
             krate.name(),
             krate.version().to_string(),
             krate.description(),
-            most_restrictive_type(&licenses),
+            licenses.most_restrictive_type(),
         )?;
         metadata.write()?;
 
@@ -333,24 +283,61 @@ impl ManagedRepo {
                 .success_or_error()
                 .context("Failed to generate cargo_embargo.json with 'cargo_embargo autoconfig'")?;
         } else {
-            write(krate.path().abs().join("cargo_embargo.json"), "{}")?;
+            write(
+                krate.path().abs().join("cargo_embargo.json"),
+                r#"{
+  "run_cargo": false,
+  "min_sdk_version": "29"
+}"#,
+            )?;
         }
-        // Workaround. Our logic for crate health assumes the crate isn't healthy if there's
-        // no Android.bp. So create an empty one.
-        write(krate.path().abs().join("Android.bp"), "")?;
 
-        self.regenerate([&crate_name].iter())?;
-        println!("Please edit {} and run 'regenerate' for this crate", managed_dir);
+        if !licenses.unsatisfied.is_empty() {
+            println!(
+                r#"
+Unable to find license files for the following license terms: {:?}
+
+Please look in {managed_dir} and try to locate the license file
+
+If you find the license file:
+* That means there's a bug in our detection logic.
+* Please file a bug at http://go/android-rust-crate-bug
+
+If you can't find the license file:
+* This is usually because the source repo for the crate contains several crates in
+  separate directories, with a license file at the root level that's not included in
+  each crate
+* Please go to the upstream repo for the crate at {}
+* Download the license file and create a patch for it. Instructions for creating patches
+  are at https://android.googlesource.com/platform/external/rust/android-crates-io/+/refs/heads/main/README.md#how-to-add-a-patch-file
+* Run `crate_tool regenerate {}` after you have added a patch for the license file
+
+We apologize for the inconvenience."#,
+                licenses.unsatisfied.iter().map(|u| u.to_string()).join(", "),
+                krate.repository().unwrap_or("(Crate repository URL not found in Cargo.toml)"),
+                krate.name()
+            );
+        } else {
+            self.regenerate([&crate_name].iter(), true)?;
+            println!(
+                "Please edit {} and run 'regenerate' for this crate",
+                managed_dir.rel().join("cargo_embargo.json").display()
+            );
+        }
 
         Ok(())
     }
-    pub fn regenerate<T: AsRef<str>>(&self, crates: impl Iterator<Item = T>) -> Result<()> {
+    pub fn regenerate<T: AsRef<str>>(
+        &self,
+        crates: impl Iterator<Item = T>,
+        run_cargo_embargo: bool,
+    ) -> Result<()> {
         let pseudo_crate = self.pseudo_crate().vendor()?;
         for crate_name in crates {
             println!("Regenerating {}", crate_name.as_ref());
             let mc = self.managed_crate_for(crate_name.as_ref())?;
             // TODO: Don't give up if there's a failure.
-            mc.regenerate(&pseudo_crate)?;
+            mc.regenerate(&pseudo_crate, run_cargo_embargo)?;
         }
 
         pseudo_crate.regenerate_crate_list()?;
@@ -677,7 +664,7 @@ impl ManagedRepo {
         for nv in &crate_updates {
             pseudo_crate.cargo_add(nv)?;
         }
-        self.regenerate(crate_updates.iter().map(|nv| nv.name()))?;
+        self.regenerate(crate_updates.iter().map(|nv| nv.name()), true)?;
         Ok(())
     }
     pub fn init(&self) -> Result<()> {
